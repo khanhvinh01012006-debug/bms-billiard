@@ -106,6 +106,7 @@ public class BookingsController : ControllerBase
 
     // Chỉ Nhân viên/Admin, hoặc chính người đặt (có mã hủy) mới xem được - trước đây ai cũng
     // đọc được tên + số điện thoại khách chỉ bằng cách đoán mã đặt bàn.
+    [AllowAnonymous]
     [HttpGet("{id:int}")]
     public async Task<ActionResult<BookingDto>> GetById(int id, [FromHeader(Name = "X-Booking-Token")] string? token)
     {

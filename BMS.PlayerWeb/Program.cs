@@ -12,7 +12,12 @@ builder.RootComponents.Add<HeadOutlet>("head::after");
 // không phải sửa code; mặc định vẫn là API chạy local.
 var apiBaseUrl = (builder.Configuration["Api:BaseUrl"] ?? "https://localhost:5001").TrimEnd('/');
 
-builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(apiBaseUrl), Timeout = TimeSpan.FromSeconds(8) });
+// Mọi request tới API tự mang JWT (xem JwtAuthorizationHandler).
+builder.Services.AddScoped(sp => new HttpClient(new JwtAuthorizationHandler(sp.GetRequiredService<AuthState>()) { InnerHandler = new HttpClientHandler() })
+{
+    BaseAddress = new Uri(apiBaseUrl),
+    Timeout = TimeSpan.FromSeconds(8)
+});
 builder.Services.AddScoped<TableApiService>();
 builder.Services.AddScoped<CueApiService>();
 builder.Services.AddScoped<PlayerApiService>();

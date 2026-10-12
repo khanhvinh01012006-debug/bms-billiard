@@ -25,6 +25,7 @@ public class CueListingsController : ControllerBase
         l.Title, l.Description, l.ImageUrl, l.DesiredTrade, l.Price, l.Status, l.CreatedAtUtc);
 
     // Danh sách tin đang mở (Status = Open), công khai không cần đăng nhập.
+    [AllowAnonymous]
     [HttpGet]
     public async Task<ActionResult<List<CueListingDto>>> GetOpenListings()
     {

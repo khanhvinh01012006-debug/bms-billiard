@@ -49,6 +49,7 @@ public class AccountsController : ControllerBase
         && !string.Equals(_configuration["Email:Provider"], "Smtp", StringComparison.OrdinalIgnoreCase);
 
     // US-001: Đăng ký (luôn tạo tài khoản Role = Player, công khai/anonymous)
+    [AllowAnonymous]
     [HttpPost("register")]
     public async Task<ActionResult<LoginResponseDto>> Register(RegisterRequestDto request)
     {
@@ -114,6 +115,7 @@ public class AccountsController : ControllerBase
     // call site hiện có (BMS.PlayerApp, AdminStaffWeb, PlayerWeb) - nhưng nội dung của nó
     // giờ là một "identifier" chung: Email (Player/Admin/Staff-cũ) HOẶC Mã nhân viên
     // (Staff đăng nhập bằng Mã nhân viên + PIN, không cần email).
+    [AllowAnonymous]
     [HttpPost("login")]
     public async Task<ActionResult<LoginResponseDto>> Login(LoginRequestDto request)
     {
@@ -151,6 +153,7 @@ public class AccountsController : ControllerBase
     // Quên mật khẩu: sinh token reset, gửi qua IEmailSender. Luôn trả thông báo thành công
     // chung chung (kể cả email không tồn tại) để tránh lộ email nào có tài khoản. Ở chế độ
     // Dev, trả kèm DebugToken thật trong response để test được mà không cần đọc log/email.
+    [AllowAnonymous]
     [HttpPost("forgot-password")]
     public async Task<ActionResult<ForgotPasswordResponseDto>> ForgotPassword(ForgotPasswordRequestDto request)
     {
@@ -183,6 +186,7 @@ public class AccountsController : ControllerBase
     }
 
     // Đặt lại mật khẩu bằng token nhận được từ forgot-password.
+    [AllowAnonymous]
     [HttpPost("reset-password")]
     public async Task<IActionResult> ResetPassword(ResetPasswordRequestDto request)
     {

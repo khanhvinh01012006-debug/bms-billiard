@@ -424,6 +424,7 @@ public class WalletController : ControllerBase
         return member is null ? NotFound("Không tìm thấy hội viên.") : member;
     }
 
+    [Authorize(Roles = "Staff,Admin")]
     [HttpGet("find-member")]
     public async Task<ActionResult<List<MemberInfoDto>>> FindMember([FromQuery] string? query)
     {

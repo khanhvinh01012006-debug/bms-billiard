@@ -35,6 +35,7 @@ public class CuesController : ControllerBase
         r.Id, r.CueId, r.Cue?.Name ?? string.Empty, r.CustomerName,
         r.RentedAtUtc, r.ReturnedAtUtc, r.Status);
 
+    [AllowAnonymous]
     [HttpGet]
     public async Task<ActionResult<List<CueDto>>> GetAll()
     {
@@ -65,6 +66,7 @@ public class CuesController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = cue.Id }, ToDto(cue));
     }
 
+    [AllowAnonymous]
     [HttpGet("{id:int}")]
     public async Task<ActionResult<CueDto>> GetById(int id)
     {

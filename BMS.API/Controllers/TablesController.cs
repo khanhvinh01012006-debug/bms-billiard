@@ -36,6 +36,7 @@ public class TablesController : ControllerBase
     }
 
     // US-006: Xem danh sách bàn
+    [AllowAnonymous]
     [HttpGet]
     public async Task<ActionResult<List<TableDto>>> GetAll()
     {
@@ -49,6 +50,7 @@ public class TablesController : ControllerBase
     }
 
     // US-007: Xem trạng thái bàn (một bàn cụ thể)
+    [AllowAnonymous]
     [HttpGet("{id:int}")]
     public async Task<ActionResult<TableDto>> GetById(int id)
     {

@@ -116,7 +116,16 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-builder.Services.AddAuthorization();
+// Mặc định MỌI endpoint đều yêu cầu JWT hợp lệ (FallbackPolicy). Endpoint công khai (đăng nhập,
+// đăng ký, xem danh sách bàn/cơ/giải đấu...) phải ghi rõ [AllowAnonymous] - thêm endpoint mới mà
+// quên gắn quyền thì vẫn được bảo vệ, không vô tình mở ra ngoài.
+builder.Services.AddAuthorization(options =>
+{
+    options.FallbackPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
+        .AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme)
+        .RequireAuthenticatedUser()
+        .Build();
+});
 
 // --- Controllers ---
 builder.Services.AddControllers();
@@ -251,6 +260,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
-app.MapHub<BmsHub>("/hubs/bms");
+app.MapHub<BmsHub>("/hubs/bms").AllowAnonymous(); // chỉ phát sự kiện công khai (trạng thái bàn...)
 
 app.Run();

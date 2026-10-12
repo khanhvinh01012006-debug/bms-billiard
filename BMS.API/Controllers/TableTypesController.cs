@@ -25,6 +25,7 @@ public class TableTypesController : ControllerBase
         t.Id, t.Name, t.Description,
         t.PricingSlots.Select(s => new PricingSlotDto(s.Id, s.StartTime, s.EndTime, s.PricePerHour)).ToList());
 
+    [AllowAnonymous]
     [HttpGet]
     public async Task<ActionResult<List<TableTypeDto>>> GetAll()
     {
@@ -36,6 +37,7 @@ public class TableTypesController : ControllerBase
         return types.Select(ToDto).ToList();
     }
 
+    [AllowAnonymous]
     [HttpGet("{id:int}")]
     public async Task<ActionResult<TableTypeDto>> GetById(int id)
     {
