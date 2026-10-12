@@ -1,0 +1,6 @@
+<!-- Simple diagonal cue stick placeholder: cream stick with felt-green grip. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <rect x="10" y="100" width="20" height="150" rx="5" fill="#F7F4EE" transform="rotate(-45 10 100)"/>
+  <rect x="10" y="100" width="20" height="40" rx="5" fill="#2F8F5B" transform="rotate(-45 10 100)"/>
+  <circle cx="102" cy="18" r="6" fill="#1B4B3A"/>
+</svg>

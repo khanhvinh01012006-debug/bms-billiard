@@ -1,0 +1,11 @@
+<!-- Simple top-down billiard table placeholder: felt green rectangle, cream rail. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 120">
+  <rect x="4" y="4" width="192" height="112" rx="16" fill="#F7F4EE"/>
+  <rect x="16" y="16" width="168" height="88" rx="10" fill="#1B4B3A"/>
+  <circle cx="24" cy="24" r="6" fill="#123329"/>
+  <circle cx="176" cy="24" r="6" fill="#123329"/>
+  <circle cx="24" cy="96" r="6" fill="#123329"/>
+  <circle cx="176" cy="96" r="6" fill="#123329"/>
+  <circle cx="100" cy="24" r="6" fill="#123329"/>
+  <circle cx="100" cy="96" r="6" fill="#123329"/>
+</svg>

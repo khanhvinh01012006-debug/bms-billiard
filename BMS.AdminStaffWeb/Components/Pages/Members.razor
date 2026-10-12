@@ -1,0 +1,255 @@
+@page "/members"
+@rendermode InteractiveServer
+@inject WalletApiService WalletApiService
+@inject AuthState AuthState
+
+<h1><Icon Name="user" Size="22" /> Hội viên</h1>
+
+@if (!AuthState.IsAdmin)
+{
+    <p class="page-empty">Bạn không có quyền truy cập trang này. Vui lòng đăng nhập bằng tài khoản Admin.</p>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(_message))
+    {
+        <p class="hint-text">@_message</p>
+    }
+
+    @if (_members.Count == 0)
+    {
+        <p class="page-empty">Chưa có hội viên nào.</p>
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Họ tên</th>
+                    <th>Email</th>
+                    <th>SĐT</th>
+                    <th>Hạng hội viên</th>
+                    <th>Số dư Ví</th>
+                    <th>Tổng đã nạp</th>
+                    <th>Ghi chú</th>
+                    <th>Xử lý</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var m in _members)
+                {
+                    <tr>
+                        <td>@m.FullName</td>
+                        <td>@m.Email</td>
+                        <td>@(m.PhoneNumber ?? "—")</td>
+                        <td><span class="badge">@m.MembershipTier</span></td>
+                        <td>@m.WalletBalance.ToString("N0") đ</td>
+                        <td>@m.TotalTopUpAmount.ToString("N0") đ</td>
+                        <td>
+                            <div class="member-note-cell">
+                                <textarea class="input" @bind="_noteDrafts[m.AccountId]"></textarea>
+                                <button class="btn btn-ghost btn-sm" @onclick="() => SaveNote(m.AccountId)">Lưu</button>
+                            </div>
+                        </td>
+                        <td class="row-actions">
+                            <button class="btn btn-ghost btn-sm" @onclick="() => OpenHourPackages(m)">Gói giờ</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+@if (_hourPackageMember is not null)
+{
+    <div class="modal-overlay" @onclick="CloseHourPackages">
+        <div class="modal-card" @onclick:stopPropagation="true">
+            <h2>Gói giờ bàn: @_hourPackageMember.FullName</h2>
+
+            @if (_hourPackages.Count == 0)
+            {
+                <p class="page-empty">Hội viên chưa có gói giờ nào.</p>
+            }
+            else
+            {
+                @foreach (var pkg in _hourPackages)
+                {
+                    <div class="hour-package-row">
+                        <div>
+                            <strong>@pkg.PackageName</strong>
+                            <div class="hint-text">
+                                Còn lại @pkg.RemainingHours.ToString("0.##")/@pkg.TotalHours.ToString("0.##") giờ
+                                — @pkg.Status
+                                @if (pkg.ExpiresAtUtc is not null)
+                                {
+                                    <span> — Hạn: @pkg.ExpiresAtUtc.Value.ToLocalTime().ToString("dd/MM/yyyy")</span>
+                                }
+                            </div>
+                        </div>
+                        @if (pkg.Status == "Active")
+                        {
+                            <div class="hour-package-consume">
+                                <input class="input" type="number" step="0.5" @bind="_consumeHours[pkg.Id]" />
+                                <button class="btn btn-ghost btn-sm" @onclick="() => ConsumeHours(pkg.Id)">Trừ giờ</button>
+                            </div>
+                        }
+                    </div>
+                }
+            }
+
+            <h2>Thêm gói mới</h2>
+            <div class="form-field">
+                <label>Tên gói</label>
+                <input class="input" @bind="_newPackage.PackageName" />
+            </div>
+            <div class="form-field">
+                <label>Tổng số giờ</label>
+                <input class="input" type="number" step="0.5" @bind="_newPackage.TotalHours" />
+            </div>
+            <div class="form-field">
+                <label>Giá đã trả (đ)</label>
+                <input class="input" type="number" @bind="_newPackage.PricePaid" />
+            </div>
+            <div class="form-field">
+                <label>Hạn dùng (tùy chọn)</label>
+                <input class="input" type="date" @bind="_newPackageExpiresAt" />
+            </div>
+
+            @if (!string.IsNullOrEmpty(_hourPackageMessage))
+            {
+                <p class="hint-text">@_hourPackageMessage</p>
+            }
+
+            <div class="form-actions">
+                <button class="btn btn-primary" @onclick="CreatePackage">Thêm gói</button>
+                <button class="btn btn-ghost" @onclick="CloseHourPackages">Đóng</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<MemberInfoDto> _members = new();
+    private string? _message;
+
+    // Đợt 9: Ghi chú nội bộ - seed Dictionary theo AccountId trước khi @bind.
+    private Dictionary<int, string?> _noteDrafts = new();
+
+    // Đợt 9: Gói giờ bàn trả trước.
+    private MemberInfoDto? _hourPackageMember;
+    private List<HourPackageDto> _hourPackages = new();
+    private Dictionary<int, decimal> _consumeHours = new();
+    private NewPackageModel _newPackage = new();
+    private DateTime? _newPackageExpiresAt;
+    private string? _hourPackageMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState.IsAdmin)
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _members = await WalletApiService.GetMembersAsync();
+
+        _noteDrafts = new Dictionary<int, string?>();
+        foreach (var m in _members)
+        {
+            _noteDrafts[m.AccountId] = m.Note;
+        }
+    }
+
+    private async Task SaveNote(int accountId)
+    {
+        var note = _noteDrafts.TryGetValue(accountId, out var value) ? value : null;
+        var (success, error) = await WalletApiService.UpdateMemberNoteAsync(accountId, note);
+        _message = success ? "Đã lưu ghi chú." : error;
+    }
+
+    private async Task OpenHourPackages(MemberInfoDto m)
+    {
+        _hourPackageMember = m;
+        _hourPackageMessage = null;
+        _newPackage = new NewPackageModel();
+        _newPackageExpiresAt = null;
+        _hourPackages = await WalletApiService.GetHourPackagesAsync(m.AccountId);
+
+        _consumeHours = new Dictionary<int, decimal>();
+        foreach (var pkg in _hourPackages)
+        {
+            _consumeHours[pkg.Id] = 0;
+        }
+    }
+
+    private void CloseHourPackages()
+    {
+        _hourPackageMember = null;
+        _hourPackages = new();
+    }
+
+    private async Task CreatePackage()
+    {
+        if (_hourPackageMember is null) return;
+
+        if (string.IsNullOrWhiteSpace(_newPackage.PackageName) || _newPackage.TotalHours <= 0)
+        {
+            _hourPackageMessage = "Vui lòng nhập tên gói và số giờ hợp lệ.";
+            return;
+        }
+
+        var request = new CreateHourPackageRequestDto(
+            _hourPackageMember.AccountId, _newPackage.PackageName, _newPackage.TotalHours,
+            _newPackage.PricePaid, _newPackageExpiresAt?.ToUniversalTime());
+
+        var (success, error) = await WalletApiService.CreateHourPackageAsync(request);
+        if (success)
+        {
+            _hourPackageMessage = "Đã thêm gói giờ.";
+            _newPackage = new NewPackageModel();
+            _newPackageExpiresAt = null;
+            _hourPackages = await WalletApiService.GetHourPackagesAsync(_hourPackageMember.AccountId);
+            foreach (var pkg in _hourPackages)
+            {
+                if (!_consumeHours.ContainsKey(pkg.Id)) _consumeHours[pkg.Id] = 0;
+            }
+        }
+        else
+        {
+            _hourPackageMessage = error;
+        }
+    }
+
+    private async Task ConsumeHours(int packageId)
+    {
+        if (_hourPackageMember is null) return;
+
+        var hours = _consumeHours.TryGetValue(packageId, out var value) ? value : 0;
+        if (hours <= 0)
+        {
+            _hourPackageMessage = "Vui lòng nhập số giờ cần trừ.";
+            return;
+        }
+
+        var (success, error) = await WalletApiService.ConsumeHourPackageAsync(packageId, hours);
+        if (success)
+        {
+            _hourPackageMessage = "Đã trừ giờ.";
+            _hourPackages = await WalletApiService.GetHourPackagesAsync(_hourPackageMember.AccountId);
+        }
+        else
+        {
+            _hourPackageMessage = error;
+        }
+    }
+
+    private class NewPackageModel
+    {
+        public string PackageName { get; set; } = string.Empty;
+        public decimal TotalHours { get; set; }
+        public decimal PricePaid { get; set; }
+    }
+}

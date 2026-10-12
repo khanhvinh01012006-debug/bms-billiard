@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 44" width="44" height="44">
+  <!-- Biểu tượng bi 8 xanh (thiết kế BilliardHub, D:\bms-anh) - logo, favicon. -->
+  <defs>
+    <radialGradient id="g" cx="35%" cy="32%" r="65%">
+      <stop offset="0%" stop-color="#4B9CFA"/>
+      <stop offset="45%" stop-color="#1D68E0"/>
+      <stop offset="85%" stop-color="#0E42A8"/>
+      <stop offset="100%" stop-color="#072A70"/>
+    </radialGradient>
+    <radialGradient id="h" cx="30%" cy="25%" r="40%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.85"/>
+      <stop offset="60%" stop-color="#ffffff" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <circle cx="22" cy="22" r="20" fill="url(#g)"/>
+  <ellipse cx="17" cy="15" rx="8" ry="5" fill="url(#h)"/>
+  <circle cx="22" cy="22" r="8.5" fill="#FFFFFF"/>
+  <text x="22" y="26.2" font-family="'Plus Jakarta Sans', Arial, sans-serif" font-size="12" font-weight="900" fill="#111827" text-anchor="middle">8</text>
+</svg>

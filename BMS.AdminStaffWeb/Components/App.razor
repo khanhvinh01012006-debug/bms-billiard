@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>BMS - Quản trị</title>
+    <base href="/" />
+    <!-- Cài như app ("BMS Quản lý"): chỉ manifest + biểu tượng riêng, KHÔNG dùng service worker
+         (Blazor Server cần kết nối trực tiếp tới máy chủ, không chạy offline). -->
+    <meta name="theme-color" content="#2563EB" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="BMS Quản lý" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+    <!-- Phông theo hệ thiết kế BilliardHub: Plus Jakarta Sans (tiêu đề) + Be Vietnam Pro
+         (nội dung, đủ dấu tiếng Việt); Material Symbols Outlined cho icon. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" />
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="ops.css" />
+    <link rel="stylesheet" href="ui.css" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
+    <HeadOutlet />
+</head>
+<body>
+    <Routes @rendermode="InteractiveServer" />
+
+    @* Hộp thoại mất kết nối tiếng Việt (thay giao diện mặc định tiếng Anh của Blazor Server).
+       Blazor tự gắn class components-reconnect-show / -retrying / -failed / -rejected. *@
+    <div id="components-reconnect-modal" class="reconnect-modal" role="alertdialog" aria-live="assertive" data-nosnippet>
+        <div class="reconnect-card">
+            <p class="reconnect-show">Mất kết nối tới máy chủ. Đang kết nối lại...</p>
+            <p class="reconnect-failed">Chưa kết nối lại được. Vui lòng kiểm tra mạng.</p>
+            <p class="reconnect-rejected">Phiên làm việc đã hết hạn. Vui lòng tải lại trang và đăng nhập lại.</p>
+            <button type="button" class="btn btn-primary reconnect-failed" onclick="Blazor.reconnect()">Thử lại</button>
+            <button type="button" class="btn btn-primary reconnect-rejected" onclick="location.reload()">Tải lại trang</button>
+        </div>
+    </div>
+    <script src="_framework/blazor.web.js"></script>
+    <script src="js/qr-scanner.js"></script>
+</body>
+</html>

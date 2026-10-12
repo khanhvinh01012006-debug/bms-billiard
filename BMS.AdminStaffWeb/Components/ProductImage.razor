@@ -1,0 +1,28 @@
+@* Ảnh sản phẩm: ưu tiên ảnh đã tải lên (Url); nếu chưa có thì dùng ảnh minh họa có sẵn
+   (FallbackBase, xem BMS.Shared.ProductImages) với srcset 2 kích thước. Luôn có width/height
+   để giữ khung 4:3 khi ảnh chưa tải xong, và lazy-load khi không nằm ở màn hình đầu. *@
+
+@if (!string.IsNullOrEmpty(Url))
+{
+    <img src="@Url" alt="@Alt" class="@Class" width="@Width" height="@Height" loading="@(Eager ? "eager" : "lazy")" decoding="async" />
+}
+else if (!string.IsNullOrEmpty(FallbackBase))
+{
+    <img src="@($"{FallbackBase}-{Small}.webp")"
+         srcset="@($"{FallbackBase}-{Small}.webp {Small}w, {FallbackBase}-{Large}.webp {Large}w")"
+         sizes="@Sizes" alt="@Alt" class="@Class" width="@Width" height="@Height"
+         loading="@(Eager ? "eager" : "lazy")" decoding="async" />
+}
+
+@code {
+    [Parameter] public string? Url { get; set; }
+    [Parameter] public string? FallbackBase { get; set; }
+    [Parameter, EditorRequired] public string Alt { get; set; } = string.Empty;
+    [Parameter] public string? Class { get; set; }
+    [Parameter] public string Sizes { get; set; } = "(max-width: 600px) 50vw, 320px";
+    [Parameter] public int Small { get; set; } = 320;
+    [Parameter] public int Large { get; set; } = 640;
+    [Parameter] public int Width { get; set; } = 320;
+    [Parameter] public int Height { get; set; } = 240;
+    [Parameter] public bool Eager { get; set; }
+}

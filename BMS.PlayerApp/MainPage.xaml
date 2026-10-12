@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="BMS.PlayerApp.MainPage"
+             Title="Bàn chơi">
+
+    <Grid RowDefinitions="Auto,Auto,Auto,*" Padding="16" RowSpacing="10">
+
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto">
+            <Label Grid.Column="0" Text="Bàn chơi" FontSize="22" FontAttributes="Bold" TextColor="{StaticResource FeltDark}" />
+            <Button Grid.Column="1" x:Name="VerifyPhoneButton" Text="Xác thực SĐT" IsVisible="False" Clicked="OnVerifyPhoneClicked" />
+            <Button Grid.Column="2" x:Name="AuthButton" Text="Đăng nhập" Clicked="OnAuthButtonClicked" />
+        </Grid>
+
+        <Label Grid.Row="1" x:Name="AuthStatusLabel" FontSize="12" TextColor="{StaticResource FeltLight}" IsVisible="False" />
+
+        <Entry Grid.Row="2" x:Name="CustomerNameEntry" Placeholder="Nhập tên của bạn" />
+
+        <RefreshView Grid.Row="3" x:Name="TablesRefreshView" Refreshing="OnRefreshing">
+            <CollectionView x:Name="TablesCollectionView" ItemsSource="{Binding}">
+                <CollectionView.ItemsLayout>
+                    <GridItemsLayout Orientation="Vertical" Span="1" />
+                </CollectionView.ItemsLayout>
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <Frame Margin="0,4">
+                            <VerticalStackLayout Spacing="4">
+                                <Label Text="{Binding Name}" FontAttributes="Bold" FontSize="16" />
+                                <Label Text="{Binding StatusLabel}" TextColor="{StaticResource FeltLight}" />
+                                <Label Text="{Binding CapacityLabel}" FontSize="12" />
+                                <Label Text="{Binding PriceLabel}" FontSize="12" />
+                                <Button Text="Đặt bàn"
+                                        IsVisible="{Binding ShowBookButton}"
+                                        Clicked="OnBookTableClicked"
+                                        CommandParameter="{Binding Id}" />
+                                <Button Text="Nhận bàn"
+                                        IsVisible="{Binding ShowCheckInButton}"
+                                        Clicked="OnCheckInClicked"
+                                        CommandParameter="{Binding Id}" />
+                                <Button Text="Trả bàn"
+                                        IsVisible="{Binding ShowCheckOutButton}"
+                                        Clicked="OnCheckOutClicked"
+                                        CommandParameter="{Binding Id}" />
+                            </VerticalStackLayout>
+                        </Frame>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+        </RefreshView>
+    </Grid>
+
+</ContentPage>

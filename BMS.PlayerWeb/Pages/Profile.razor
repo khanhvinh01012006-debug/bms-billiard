@@ -1,0 +1,145 @@
+@page "/profile"
+@inject AccountApiService AccountApiService
+@inject AuthState AuthState
+@inject AuthStorageService AuthStorage
+@inject NavigationManager NavigationManager
+
+<h1><Icon Name="user" Size="22" /> Hồ sơ cá nhân</h1>
+
+@if (!AuthState.IsAuthenticated)
+{
+    <p class="hint-text">Đang chuyển tới trang đăng nhập...</p>
+}
+else if (_loading)
+{
+    <p>Đang tải...</p>
+}
+else
+{
+    @* 2 cột trên máy tính: thẻ tóm tắt tài khoản | form sửa thông tin; điện thoại: 1 cột. *@
+    <div class="profile-layout">
+    <aside class="profile-summary">
+        <span class="profile-avatar" aria-hidden="true">@Initial</span>
+        <span class="profile-summary-name">@AuthState.FullName</span>
+        <span class="profile-summary-sub">@_profile?.Email</span>
+        @if (_profile?.EloRating is not null)
+        {
+            <div class="elo-badge">
+                <span class="elo-badge-label">Điểm ELO</span>
+                <span class="elo-badge-value">@_profile.EloRating</span>
+                @if (!string.IsNullOrEmpty(_profile.PlayerDisplayName))
+                {
+                    <span class="elo-badge-name">@_profile.PlayerDisplayName</span>
+                }
+            </div>
+        }
+    </aside>
+    <div class="login-form-card profile-card">
+        <EditForm Model="_form" OnValidSubmit="HandleSave">
+            <div class="form-field">
+                <label>Họ và tên</label>
+                <InputText class="input" @bind-Value="_form.FullName" />
+            </div>
+            <div class="form-field">
+                <label>Email</label>
+                <input class="input" value="@_profile?.Email" disabled />
+            </div>
+            <div class="form-field">
+                <label>Địa chỉ</label>
+                <InputText class="input" @bind-Value="_form.Address" placeholder="Địa chỉ liên hệ" />
+            </div>
+            <div class="form-field">
+                <label for="profile-phone">Số điện thoại</label>
+                <div class="input-with-action">
+                    <input id="profile-phone" class="input" value="@_profile?.PhoneNumber" placeholder="Chưa cập nhật" readonly />
+                    @if (_profile?.IsPhoneVerified == true)
+                    {
+                        <span class="badge badge-success">Đã xác thực</span>
+                    }
+                    else
+                    {
+                        <a class="btn btn-primary btn-sm" href="verify-phone">Xác thực SĐT</a>
+                    }
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_message))
+            {
+                <p class="hint-text">@_message</p>
+            }
+
+            <button type="submit" class="btn btn-primary btn-block" disabled="@_busy">
+                @(_busy ? "Đang lưu..." : "Lưu thay đổi")
+            </button>
+        </EditForm>
+    </div>
+    </div>
+}
+
+@code {
+    private ProfileDto? _profile;
+
+    private string Initial =>
+        string.IsNullOrWhiteSpace(AuthState.FullName)
+            ? "?"
+            : AuthState.FullName!.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries)[^1][..1].ToUpperInvariant();
+    private FormModel _form = new();
+    private bool _loading = true;
+    private bool _busy;
+    private string? _message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsAuthenticated)
+        {
+            NavigationManager.NavigateTo("/login");
+            return;
+        }
+
+        var (success, result, error) = await AccountApiService.GetProfileAsync();
+        if (success && result is not null)
+        {
+            _profile = result;
+            _form.FullName = result.FullName;
+            _form.Address = result.Address ?? string.Empty;
+        }
+        else if (!AuthState.IsAuthenticated)
+        {
+            // GetProfileAsync signs the user out automatically on a 401 (expired/invalid
+            // token) - follow through with the redirect instead of showing an empty form.
+            NavigationManager.NavigateTo("/login");
+            return;
+        }
+        else
+        {
+            _message = error ?? "Không tải được hồ sơ.";
+        }
+        _loading = false;
+    }
+
+    private async Task HandleSave()
+    {
+        _busy = true;
+        _message = null;
+
+        var (success, error) = await AccountApiService.UpdateProfileAsync(_form.FullName, _form.Address);
+        _busy = false;
+
+        if (success)
+        {
+            _message = "Đã lưu thay đổi.";
+            AuthState.UpdateFullName(_form.FullName);
+            await AuthStorage.UpdateStoredNameAsync(_form.FullName);
+        }
+        else
+        {
+            _message = error ?? "Lưu thất bại.";
+        }
+    }
+
+    private class FormModel
+    {
+        public string FullName { get; set; } = string.Empty;
+        public string Address { get; set; } = string.Empty;
+    }
+}

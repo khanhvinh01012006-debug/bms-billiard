@@ -1,0 +1,1360 @@
+@page "/ops"
+@rendermode InteractiveServer
+@inject TableApiService TableApiService
+@inject OrderApiService OrderApiService
+@inject WalletApiService WalletApiService
+@inject SettingsApiService SettingsApiService
+@inject IConfiguration Configuration
+@inject AuthState AuthState
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+@using Microsoft.AspNetCore.SignalR.Client
+
+<h1 id="table-list">Bàn chơi</h1>
+
+@if (!AuthState.IsStaffOrAdmin)
+{
+    <p class="page-empty">Vui lòng đăng nhập bằng tài khoản Nhân viên hoặc Admin.</p>
+    return;
+}
+
+@* Đợt 15: dải thống kê nhanh 1 hàng theo Stitch "tinh gọn" (chấm emerald = đang chơi,
+   chấm xám = trống) - thay cho hero banner gradient + 3 ô thống kê. Hiện cho cả khách
+   và nhân viên vì giúp nắm nhanh tình trạng quán lúc đông khách. *@
+@if (!_loading)
+{
+    var reservedCount = _tables.Count(t => t.Status == BMS.Shared.Dtos.TableStatus.Reserved);
+    <section class="stat-strip">
+        <div class="stat-strip-group">
+            <span class="stat-strip-item">
+                <span class="stat-dot stat-dot-live"></span>
+                <strong>@_tables.Count(t => t.Status == BMS.Shared.Dtos.TableStatus.Occupied)</strong> chơi
+            </span>
+            <span class="stat-strip-sep">·</span>
+            <span class="stat-strip-item">
+                <span class="stat-dot"></span>
+                <strong>@_tables.Count(t => t.Status == BMS.Shared.Dtos.TableStatus.Available)</strong> trống
+            </span>
+            @if (reservedCount > 0)
+            {
+                <span class="stat-strip-sep">·</span>
+                <span class="stat-strip-item">
+                    <span class="stat-dot stat-dot-reserved"></span>
+                    <strong>@reservedCount</strong> đặt trước
+                </span>
+            }
+        </div>
+        <div class="stat-strip-total">
+            <span class="stat-strip-label">Tổng số bàn</span>
+            <span class="stat-strip-value">@_tables.Count</span>
+        </div>
+    </section>
+}
+
+@if (AuthState.IsStaffOrAdmin)
+{
+    <p class="hint-text">Chế độ nhân viên: bạn có thể nhận/trả bàn cho khách tại quầy.</p>
+
+    <div class="section">
+        <h2>Yêu cầu đặt bàn chờ duyệt</h2>
+        @if (_pendingBookings.Count == 0)
+        {
+            <p class="page-empty">Không có yêu cầu nào đang chờ.</p>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Bàn</th><th>Khách</th><th>SĐT</th><th>Thời lượng</th><th>Hết hạn giữ chỗ</th><th>Xử lý</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var b in _pendingBookings)
+                    {
+                        <tr>
+                            <td>@b.TableName</td>
+                            <td>@b.CustomerName</td>
+                            <td>@b.PhoneNumber</td>
+                            <td>@b.DurationMinutes phút</td>
+                            <td>@CountdownText(b.ExpiresAtUtc)</td>
+                            <td class="row-actions">
+                                <button class="btn btn-primary btn-sm" @onclick="() => ConfirmBooking(b.Id)">Giữ chỗ</button>
+                                <button class="btn btn-danger btn-sm" @onclick="() => CancelBooking(b.Id, b.CustomerName)">Hủy</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+
+        @if (_expiredBookings.Count > 0)
+        {
+            <h2 style="margin-top:1rem;">Yêu cầu đã quá hạn gần đây</h2>
+            <table class="data-table">
+                <thead>
+                    <tr><th>Bàn</th><th>Khách</th><th>SĐT</th><th>Xử lý</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var b in _expiredBookings)
+                    {
+                        <tr>
+                            <td>@b.TableName</td>
+                            <td>@b.CustomerName</td>
+                            <td>@b.PhoneNumber</td>
+                            <td><button class="btn btn-warning btn-sm" @onclick="() => CheckInLate(b.Id)">Nhận khách đến trễ</button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+}
+
+@if (_loading)
+{
+    <p>Đang tải...</p>
+}
+else
+{
+    var tableTypes = _tables
+        .Select(t => t.TableTypeName)
+        .Where(n => !string.IsNullOrWhiteSpace(n))
+        .Distinct()
+        .OrderBy(n => n)
+        .ToList();
+
+    @if (tableTypes.Count > 1)
+    {
+        <section class="filter-chip-row">
+            <button class="filter-chip @(_tableTypeFilter is null ? "filter-chip-active" : "")" @onclick="() => _tableTypeFilter = null">Tất cả (@_tables.Count)</button>
+            @foreach (var typeName in tableTypes)
+            {
+                <button class="filter-chip @(_tableTypeFilter == typeName ? "filter-chip-active" : "")" @onclick="() => _tableTypeFilter = typeName">@typeName (@_tables.Count(t => t.TableTypeName == typeName))</button>
+            }
+        </section>
+    }
+    <div class="table-grid table-grid-cards">
+        @foreach (var table in _tables.Where(t => _tableTypeFilter is null || t.TableTypeName == _tableTypeFilter))
+        {
+            var isOccupied = table.Status == BMS.Shared.Dtos.TableStatus.Occupied;
+            <article class="table-card status-@table.Status.ToString().ToLowerInvariant()" id="@(table.Id == _firstFreeTableId ? "ban-trong" : null)">
+                <div class="tcard-felt" aria-hidden="true">
+                    @if (table.Status != BMS.Shared.Dtos.TableStatus.Available)
+                    {
+                        <span class="tcard-felt-label">@StatusLabel(table.Status)</span>
+                    }
+                </div>
+                @* Đợt 16: card đúng mẫu Stitch "tinh gọn" - tiêu đề 20px + dòng phụ "Loại ·
+                   giá/giờ" ngăn bằng dấu chấm giữa, pill trạng thái bên phải. *@
+                <div class="tcard-head">
+                    <div class="tcard-title-wrap">
+                        <div class="tcard-title-row">
+                            @if (IsVipType(table.TableTypeName))
+                            {
+                                <span class="tag-vip">VIP</span>
+                            }
+                            <h3 class="tcard-title">@table.Name</h3>
+                        </div>
+                        <p class="tcard-sub">
+                            @if (!string.IsNullOrEmpty(table.TableTypeName))
+                            {
+                                <span>@table.TableTypeName</span><span class="dot-sep">·</span>
+                            }
+                            <span>@table.Capacity người</span><span class="dot-sep">·</span>
+                            <span class="tcard-sub-strong">@table.PricePerHour.ToString("N0")đ/giờ</span>
+                        </p>
+                    </div>
+                    @if (isOccupied && table.ActiveSessionStartedAtUtc is not null)
+                    {
+                        var elapsed = ClockNow(table) - table.ActiveSessionStartedAtUtc.Value;
+                        <span class="live-pill @(table.PausedAtUtc is not null ? "live-pill-paused" : "")">
+                            @if (table.PausedAtUtc is not null)
+                            {
+                                <Icon Name="pause" Size="14" /> <span>Tạm dừng</span>
+                            }
+                            else
+                            {
+                                <span class="live-pill-dot"></span>
+                            }
+                            <span class="live-pill-time">@elapsed.ToString(@"hh\:mm\:ss")</span>
+                        </span>
+                    }
+                    else
+                    {
+                        <span class="status-pill status-pill-@table.Status.ToString().ToLowerInvariant()">
+                            @if (table.Status == BMS.Shared.Dtos.TableStatus.Reserved)
+                            {
+                                <Icon Name="clock" Size="14" />
+                            }
+                            @(table.Status == BMS.Shared.Dtos.TableStatus.Available ? "Bàn trống" : StatusLabel(table.Status))
+                        </span>
+                    }
+                </div>
+
+                @if (AuthState.IsStaffOrAdmin && isOccupied && table.ActiveSessionStartedAtUtc is not null)
+                {
+                    var elapsed = ClockNow(table) - table.ActiveSessionStartedAtUtc.Value;
+                    var running = EstimateHourlyAmount(table);
+                    <div class="table-timer">
+                        <span class="table-timer-left">Giờ chơi: @elapsed.ToString(@"hh\:mm")</span>
+                        <span class="table-timer-right">
+                            <span class="table-timer-label">Tạm tính:</span>
+                            <span class="table-timer-value">@running.ToString("N0")đ</span>
+                        </span>
+                    </div>
+                }
+
+                @if (AuthState.IsStaffOrAdmin)
+                {
+                    @if (table.Status == BMS.Shared.Dtos.TableStatus.Available)
+                    {
+                        <div class="table-actions-grid table-actions-grid-1">
+                            <input class="input input-sm" placeholder="Tên khách" @bind="_staffCustomerNameByTable[table.Id]" />
+                            <button class="btn btn-ghost btn-sm" @onclick="() => CheckIn(table.Id)">
+                                <Icon Name="play" Size="18" Class="icon-accent" /> Mở bàn nhanh
+                            </button>
+                        </div>
+                    }
+                    else if (isOccupied)
+                    {
+                        @if (table.PendingPaymentSessionId is int pendingSessionId)
+                        {
+                            <div class="table-meta">
+                                <span class="badge badge-gold">Chờ thanh toán</span>
+                            </div>
+                            <button class="btn btn-primary btn-sm btn-full" @onclick="() => OpenPaymentModalForPendingSession(pendingSessionId, table.Name)">
+                                <Icon Name="money" Size="16" /> Thanh toán
+                            </button>
+                        }
+                        else
+                        {
+                            <div class="table-actions-grid">
+                                <button class="btn btn-ghost btn-sm" @onclick="() => OpenOrderModal(table)">
+                                    <Icon Name="food" Size="16" /> Gọi món
+                                </button>
+                                <button class="btn btn-primary btn-sm" @onclick="() => OpenCheckoutModal(table)">
+                                    <Icon Name="money" Size="16" /> Thanh toán
+                                </button>
+                            </div>
+                            <div class="table-actions-grid">
+                                @if (table.PausedAtUtc is not null)
+                                {
+                                    <button class="btn btn-ghost btn-sm" @onclick="() => ResumeSession(table)">
+                                        <Icon Name="play" Size="16" /> Chơi tiếp
+                                    </button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-ghost btn-sm" @onclick="() => PauseSession(table)">
+                                        <Icon Name="pause" Size="16" /> Tạm dừng
+                                    </button>
+                                }
+                                <button class="btn btn-ghost btn-sm" @onclick="() => OpenTransferModal(table)">
+                                    <Icon Name="swap_horiz" Size="16" /> Chuyển bàn
+                                </button>
+                            </div>
+                        }
+                    }
+                    else if (table.Status == BMS.Shared.Dtos.TableStatus.Reserved)
+                    {
+                        var reservedBooking = _confirmedBookings.FirstOrDefault(b => b.TableId == table.Id);
+                        @if (reservedBooking is not null)
+                        {
+                            <div class="table-meta">Khách đã giữ chỗ: @reservedBooking.CustomerName</div>
+                            <button class="btn btn-gold btn-sm btn-full" @onclick="() => CheckInReserved(table.Id, reservedBooking.CustomerName, reservedBooking.Id)">
+                                <Icon Name="check" Size="16" /> Nhận bàn ngay
+                            </button>
+                            <button class="btn btn-ghost btn-sm btn-full" @onclick="() => CancelBooking(reservedBooking.Id, reservedBooking.CustomerName)">
+                                <Icon Name="close" Size="16" /> Hủy giữ chỗ
+                            </button>
+                        }
+                    }
+                }
+            </article>
+        }
+    </div>
+}
+
+@* Đợt 16: nút nổi "+ Mở bàn" (FAB) như Stitch tinh gọn - cuộn tới bàn trống đầu tiên để
+   nhân viên nhập tên khách và mở bàn ngay. *@
+@if (AuthState.IsStaffOrAdmin && _firstFreeTableId is not null)
+{
+    <a class="fab-open" href="#ban-trong" @onclick:preventDefault="true" @onclick="ScrollToFirstFree">
+        <Icon Name="add" Size="22" />
+        <span>Mở bàn</span>
+    </a>
+}
+
+@if (!string.IsNullOrEmpty(_message))
+{
+    <p class="toast-msg" @key="_message" role="status">@_message</p>
+}
+
+@if (_orderModalTable is not null)
+{
+    <div class="modal-overlay" @onclick="CloseOrderModal">
+        <div class="modal-card" @onclick:stopPropagation="true">
+            <h2>Gọi món & dịch vụ - @_orderModalTable.Name</h2>
+
+            @if (_orderModalTable.ActiveSessionId is null)
+            {
+                <p class="hint-text">Bàn này chưa có phiên chơi đang hoạt động.</p>
+            }
+            else
+            {
+                <div class="section">
+                    <h3>Thêm nhanh từ Kho</h3>
+                    @* Đợt 16: thực đơn dài (hơn 20 món) -> thêm ô tìm món + chip lọc theo danh mục,
+                       mỗi món là 1 dòng gọn: tên/giá | số lượng | Thêm. *@
+                    <input class="input order-search" placeholder="Tìm món: cà phê, bia, khô gà..." @bind="_orderSearch" @bind:event="oninput" />
+                    <div class="order-cats">
+                        <button class="order-cat @(_orderCategory is null ? "is-active" : "")" @onclick="() => _orderCategory = null">Tất cả</button>
+                        @foreach (var cat in _quickAddItems.Select(i => i.Category).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().OrderBy(c => c))
+                        {
+                            <button class="order-cat @(_orderCategory == cat ? "is-active" : "")" @onclick="() => _orderCategory = cat">@cat</button>
+                        }
+                    </div>
+                    <div class="order-list">
+                        @foreach (var item in _quickAddItems
+                            .Where(i => _orderCategory is null || i.Category == _orderCategory)
+                            .Where(i => string.IsNullOrWhiteSpace(_orderSearch) || i.Name.Contains(_orderSearch.Trim(), StringComparison.OrdinalIgnoreCase)))
+                        {
+                            @* Mỗi món 1 hàng: ảnh vuông 64px | tên, giá, tồn kho | số lượng + Thêm. *@
+                            <div class="order-item">
+                                <span class="order-item-media">
+                                    @if (string.IsNullOrEmpty(item.ImageUrl) && ProductImages.ForFnb(item.Name, item.Category) is null)
+                                    {
+                                        <Icon Name="food" Size="28" Class="order-item-noimg" />
+                                    }
+                                    else
+                                    {
+                                        <ProductImage Url="@item.ImageUrl" FallbackBase="@ProductImages.ForFnb(item.Name, item.Category)" Alt="@item.Name"
+                                                      Class="order-item-thumb" Small="160" Large="320" Width="64" Height="64" Sizes="64px" />
+                                    }
+                                </span>
+                                <div class="order-item-text">
+                                    <span class="order-item-name" title="@item.Name">@item.Name</span>
+                                    <span class="order-item-price">@(item.UnitPrice?.ToString("N0") ?? "0")đ</span>
+                                    <span class="order-item-stock">còn @item.Quantity @item.Unit</span>
+                                </div>
+                                <div class="order-item-actions">
+                                    <input class="input order-qty" type="number" min="1" @bind="_quickAddQty[item.Id]" aria-label="Số lượng @item.Name" />
+                                    <button class="btn btn-primary btn-sm order-add" @onclick="() => AddQuickOrder(item)">Thêm</button>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Dịch vụ khác (nhập tay)</h3>
+                    <div class="form-field">
+                        <label>Tên dịch vụ</label>
+                        <input class="input" @bind="_freeOrderName" placeholder="VD: Phí vệ sinh riêng" />
+                    </div>
+                    <div class="form-actions">
+                        <input class="input input-sm" style="width:6rem;" type="number" min="0" @bind="_freeOrderPrice" placeholder="Đơn giá" />
+                        <input class="input input-sm" style="width:4rem;" type="number" min="1" @bind="_freeOrderQty" />
+                        <button class="btn btn-primary btn-sm" @onclick="AddFreeOrder">Thêm</button>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Đã gọi</h3>
+                    @if (_sessionOrders.Count == 0)
+                    {
+                        <p class="page-empty">Chưa có món nào.</p>
+                    }
+                    else
+                    {
+                        <table class="data-table">
+                            <thead><tr><th>Món</th><th>SL</th><th>Thành tiền</th><th></th></tr></thead>
+                            <tbody>
+                                @foreach (var o in _sessionOrders)
+                                {
+                                    <tr>
+                                        <td>@o.ItemName</td>
+                                        <td>@o.Quantity</td>
+                                        <td>@o.LineTotal.ToString("N0") đ</td>
+                                        <td><button class="btn btn-danger btn-sm" @onclick="() => RemoveOrder(o.Id)">Xóa</button></td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr><td colspan="2"><strong>Tổng tiền order</strong></td><td colspan="2"><strong>@_sessionOrders.Sum(x => x.LineTotal).ToString("N0") đ</strong></td></tr>
+                            </tfoot>
+                        </table>
+                    }
+                </div>
+
+                @if (!string.IsNullOrEmpty(_orderModalError))
+                {
+                    <p class="error-text">@_orderModalError</p>
+                }
+            }
+
+            <div class="form-actions">
+                <button class="btn btn-ghost" @onclick="CloseOrderModal">Đóng</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_checkoutModalTable is not null)
+{
+    <div class="modal-overlay" @onclick="CloseCheckoutModal">
+        <div class="modal-card" @onclick:stopPropagation="true">
+            <h2>Trả bàn - @_checkoutModalTable.Name</h2>
+            <div class="form-field">
+                <label>Phụ thu (tùy chọn, VD: phí hư hỏng)</label>
+                <input class="input" type="number" min="0" @bind="_checkoutSurchargeAmount" />
+            </div>
+            <div class="form-field">
+                <label>Lý do phụ thu</label>
+                <input class="input" @bind="_checkoutSurchargeReason" placeholder="VD: Làm rách nỉ bàn" />
+            </div>
+
+            @if (!string.IsNullOrEmpty(_checkoutError))
+            {
+                <p class="error-text">@_checkoutError</p>
+            }
+
+            <div class="form-actions">
+                <button class="btn btn-primary" @onclick="ConfirmCheckOut" disabled="@_checkoutBusy">
+                    @(_checkoutBusy ? "Đang xử lý..." : "Xác nhận trả bàn")
+                </button>
+                <button class="btn btn-ghost" @onclick="CloseCheckoutModal">Hủy</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_paymentModalSessionId is not null)
+{
+    <div class="modal-overlay" @onclick="ClosePaymentModal">
+        <div class="modal-card" @onclick:stopPropagation="true">
+            <h2>Thanh toán - @_paymentModalTableName</h2>
+            @* Đợt 16: tóm tắt hóa đơn dạng bảng 2 cột (nhãn trái, số tiền phải) cho dễ đọc. *@
+            <div class="bill-summary">
+                <div class="bill-row"><span>Thời gian chơi</span><span>@_paymentModalDuration.ToString(@"hh\:mm\:ss")</span></div>
+                <div class="bill-row"><span>Tiền giờ</span><span>@_paymentModalHourlyAmount.ToString("N0")đ</span></div>
+                <div class="bill-row"><span>Tiền order</span><span>@_paymentModalOrdersAmount.ToString("N0")đ</span></div>
+                <div class="bill-row"><span>Phụ thu</span><span>@_paymentModalSurchargeAmount.ToString("N0")đ</span></div>
+                <div class="bill-row bill-total"><span>Tổng cộng</span><span>@_paymentModalTotalAmount.ToString("N0")đ</span></div>
+            </div>
+
+            <div class="section">
+                <h3>Giảm giá (tùy chọn)</h3>
+                @if (_appliedDiscountRequestId is not null)
+                {
+                    <div class="table-meta">Đã áp dụng giảm @_appliedDiscountPercent% (-@_appliedDiscountAmount.ToString("N0") đ) - Tổng còn lại: <strong>@EffectiveTotalAmount.ToString("N0") đ</strong></div>
+                }
+                else if (_discountStatus == "PendingApproval")
+                {
+                    <p class="hint-text">Đã gửi yêu cầu giảm giá @_discountPercent%, đang chờ Admin duyệt...</p>
+                    <div class="form-actions">
+                        <button class="btn btn-ghost btn-sm" @onclick="CheckDiscountStatus">Kiểm tra đã duyệt chưa</button>
+                    </div>
+                }
+                else if (_discountStatus == "Rejected")
+                {
+                    <p class="error-text">Yêu cầu giảm giá đã bị từ chối.</p>
+                }
+                else
+                {
+                    <div class="form-actions discount-row">
+                        <input class="input input-sm" style="width:6rem;" type="number" min="0" max="100" @bind="_discountPercent" placeholder="% giảm" />
+                        <input class="input" @bind="_discountReason" placeholder="Lý do (tùy chọn)" />
+                        <button class="btn btn-ghost btn-sm" @onclick="RequestDiscount" disabled="@_discountBusy">
+                            @(_discountBusy ? "Đang gửi..." : "Áp dụng giảm giá")
+                        </button>
+                    </div>
+                }
+                @if (!string.IsNullOrEmpty(_discountError))
+                {
+                    <p class="error-text">@_discountError</p>
+                }
+            </div>
+
+            <div class="form-actions pay-methods">
+                <button class="@PaymentTabClass(PaymentMethodWallet)" @onclick="() => SetPaymentMethod(PaymentMethodWallet)">Thẻ hội viên</button>
+                <button class="@PaymentTabClass(PaymentMethodBankTransfer)" @onclick="() => SetPaymentMethod(PaymentMethodBankTransfer)">Chuyển khoản</button>
+                <button class="@PaymentTabClass(PaymentMethodCash)" @onclick="() => SetPaymentMethod(PaymentMethodCash)">Tiền mặt</button>
+            </div>
+
+            @if (_paymentMethod == "Wallet" || _paymentMethod == "BankTransfer")
+            {
+                <div class="section">
+                    @if (_paymentMethod == "BankTransfer")
+                    {
+                        <div class="qr-pay-grid">
+                            @if (BankQrImageUrl is string bankQr)
+                            {
+                                <div class="qr-pay-col">
+                                    <div class="qr-pay-label">Chuyển khoản ngân hàng</div>
+                                    <img class="qr-pay-image" src="@bankQr" alt="QR chuyển khoản ngân hàng" />
+                                    <div class="table-meta">Số tiền và nội dung đã tự điền sẵn trong mã QR - khách chỉ cần quét bằng app ngân hàng bất kỳ.</div>
+                                </div>
+                            }
+                            <div class="qr-pay-col">
+                                <div class="qr-pay-label">Chuyển khoản Momo</div>
+                                <img class="qr-pay-image" src="/images/momo-qr-static.png" alt="QR Momo" />
+                                <div class="table-meta">Momo chưa hỗ trợ tự điền số tiền - nhờ khách <strong>tự nhập @EffectiveTotalAmount.ToString("N0") đ</strong> khi chuyển.</div>
+                            </div>
+                        </div>
+                        <div class="qr-pay-confirm">
+                            <label class="checkbox-row">
+                                <input type="checkbox" @bind="_bankTransferConfirmed" />
+                                <span>Tôi đã kiểm tra ứng dụng ngân hàng/Momo và xác nhận đã nhận đủ <strong>@EffectiveTotalAmount.ToString("N0") đ</strong></span>
+                            </label>
+                            <p class="hint-text">Hệ thống chưa kết nối trực tiếp với ngân hàng nên không thể tự phát hiện tiền về - vui lòng kiểm tra thủ công trước khi xác nhận.</p>
+                        </div>
+                    }
+                    <div class="form-actions">
+                        <input class="input" placeholder="Tìm hội viên (SĐT/email/tên)" @bind="_memberSearchQuery" />
+                        <button class="btn btn-ghost btn-sm" @onclick="SearchMembers">Tìm</button>
+                        <button class="btn btn-ghost btn-sm" @onclick="() => _qrScanOpen = true"><Icon Name="qr_code_scanner" Size="16" /> Quét QR</button>
+                    </div>
+
+                    @if (_selectedMember is not null)
+                    {
+                        <div class="table-meta">
+                            Đã chọn: <strong>@_selectedMember.FullName</strong> - Số dư: @_selectedMember.WalletBalance.ToString("N0") đ
+                            @if (_paymentMethod == "Wallet" && _selectedMember.WalletBalance < EffectiveTotalAmount)
+                            {
+                                <span class="error-text">(Số dư không đủ)</span>
+                            }
+                        </div>
+                    }
+                    else if (_memberSearchResults.Count > 0)
+                    {
+                        <table class="data-table">
+                            <thead><tr><th>Tên</th><th>SĐT</th><th>Số dư</th><th></th></tr></thead>
+                            <tbody>
+                                @foreach (var m in _memberSearchResults)
+                                {
+                                    <tr>
+                                        <td>@m.FullName</td>
+                                        <td>@m.PhoneNumber</td>
+                                        <td>@m.WalletBalance.ToString("N0") đ</td>
+                                        <td><button class="btn btn-primary btn-sm" @onclick="() => SelectMember(m)">Chọn</button></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="section">
+                    <div class="form-field">
+                        <label>Tiền khách đưa</label>
+                        <input class="input" type="number" min="0" @bind="_cashReceived" />
+                    </div>
+                    <div class="table-meta">
+                        Tiền thối:
+                        @if (ChangeAmount < 0)
+                        {
+                            <span class="error-text">Thiếu @((-ChangeAmount).ToString("N0")) đ</span>
+                        }
+                        else
+                        {
+                            <strong>@ChangeAmount.ToString("N0") đ</strong>
+                        }
+                    </div>
+
+                    <div class="form-actions" style="margin-top:0.5rem;">
+                        <input class="input" placeholder="Tìm hội viên (tùy chọn, SĐT/email/tên)" @bind="_memberSearchQuery" />
+                        <button class="btn btn-ghost btn-sm" @onclick="SearchMembers">Tìm</button>
+                        <button class="btn btn-ghost btn-sm" @onclick="() => _qrScanOpen = true"><Icon Name="qr_code_scanner" Size="16" /> Quét QR</button>
+                    </div>
+
+                    @if (_selectedMember is not null)
+                    {
+                        <div class="table-meta">Đã chọn: <strong>@_selectedMember.FullName</strong></div>
+                    }
+                    else if (_memberSearchResults.Count > 0)
+                    {
+                        <table class="data-table">
+                            <thead><tr><th>Tên</th><th>SĐT</th><th></th></tr></thead>
+                            <tbody>
+                                @foreach (var m in _memberSearchResults)
+                                {
+                                    <tr>
+                                        <td>@m.FullName</td>
+                                        <td>@m.PhoneNumber</td>
+                                        <td><button class="btn btn-primary btn-sm" @onclick="() => SelectMember(m)">Chọn</button></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(_paymentError))
+            {
+                <p class="error-text">@_paymentError</p>
+            }
+
+            <div class="form-actions">
+                <button class="btn btn-primary" @onclick="ConfirmPayment" disabled="@PaymentConfirmDisabled">
+                    @(_paymentBusy ? "Đang xử lý..." : "Xác nhận thanh toán")
+                </button>
+                <button class="btn btn-ghost" @onclick="ClosePaymentModal">Hủy</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_invoiceResult is not null)
+{
+    <div class="modal-overlay">
+        <div class="modal-card invoice-print-area" @onclick:stopPropagation="true">
+            <h2>Hóa đơn - @_invoiceResult.TableName</h2>
+            @* Đợt 16: hóa đơn dạng 2 cột như form thanh toán. Sửa lỗi "Tiền thối" hiện ra chữ
+               ".ToString("N0")" do biểu thức Razor @(...) đóng ngoặc quá sớm. *@
+            <div class="bill-summary">
+                <div class="bill-row"><span>Thời gian chơi</span><span>@_invoiceResult.Duration.ToString(@"hh\:mm\:ss")</span></div>
+                <div class="bill-row"><span>Tiền giờ</span><span>@_invoiceResult.HourlyAmount.ToString("N0")đ</span></div>
+                <div class="bill-row"><span>Tiền order</span><span>@_invoiceResult.OrdersAmount.ToString("N0")đ</span></div>
+                <div class="bill-row"><span>Phụ thu</span><span>@_invoiceResult.SurchargeAmount.ToString("N0")đ</span></div>
+                @if (_invoiceResult.DiscountAmount > 0)
+                {
+                    <div class="bill-row"><span>Giảm giá</span><span>-@_invoiceResult.DiscountAmount.ToString("N0")đ</span></div>
+                }
+                <div class="bill-row bill-total"><span>Tổng cộng</span><span>@_invoiceResult.TotalAmount.ToString("N0")đ</span></div>
+            </div>
+            <div class="bill-summary bill-meta">
+                <div class="bill-row"><span>Phương thức</span><span>@PaymentMethodLabel(_invoiceResult.Method)</span></div>
+                @if (_invoiceResult.CashReceivedAmount is decimal cashReceivedShown)
+                {
+                    <div class="bill-row"><span>Tiền khách đưa</span><span>@cashReceivedShown.ToString("N0")đ</span></div>
+                    <div class="bill-row"><span>Tiền thối</span><span>@((_invoiceResult.ChangeAmount ?? 0m).ToString("N0"))đ</span></div>
+                }
+                @if (!string.IsNullOrEmpty(_invoiceResult.MemberName))
+                {
+                    <div class="bill-row"><span>Hội viên</span><span>@_invoiceResult.MemberName</span></div>
+                }
+                <div class="bill-row"><span>Nhân viên xử lý</span><span>@_invoiceResult.ProcessedByName</span></div>
+                <div class="bill-row"><span>Hoàn tất lúc</span><span>@_invoiceResult.CompletedAtUtc.ToLocalTime().ToString("HH:mm dd/MM/yyyy")</span></div>
+            </div>
+
+            <div class="form-actions">
+                <button class="btn btn-primary" @onclick="PrintInvoice">In hóa đơn</button>
+                <button class="btn btn-ghost" @onclick="CloseInvoice">Đóng</button>
+            </div>
+        </div>
+    </div>
+}
+
+
+@if (_transferFrom is not null)
+{
+    <div class="modal-overlay" @onclick="() => _transferFrom = null">
+        <div class="modal-card" @onclick:stopPropagation="true">
+            <h2>Chuyển bàn - @_transferFrom.Name</h2>
+            <p class="hint-text">Giữ nguyên giờ bắt đầu và món đã gọi; khi trả bàn, tiền giờ tính theo bảng giá của bàn mới.</p>
+            @{
+                var freeTables = _tables.Where(t => t.Status == BMS.Shared.Dtos.TableStatus.Available).ToList();
+            }
+            @if (freeTables.Count == 0)
+            {
+                <p class="page-empty">Hiện không có bàn trống để chuyển.</p>
+            }
+            else
+            {
+                <div class="form-field">
+                    <label for="transfer-to">Chuyển sang bàn</label>
+                    <select id="transfer-to" class="input" @bind="_transferToId">
+                        <option value="0">-- Chọn bàn trống --</option>
+                        @foreach (var t in freeTables)
+                        {
+                            <option value="@t.Id">@t.Name (@(t.TableTypeName ?? "Chưa phân loại") · @t.PricePerHour.ToString("N0")đ/giờ)</option>
+                        }
+                    </select>
+                </div>
+            }
+            @if (!string.IsNullOrEmpty(_transferError))
+            {
+                <p class="error-text">@_transferError</p>
+            }
+            <div class="form-actions">
+                <button class="btn btn-primary" @onclick="ConfirmTransfer" disabled="@(_transferToId == 0 || _transferBusy)">
+                    @(_transferBusy ? "Đang chuyển..." : "Xác nhận chuyển bàn")
+                </button>
+                <button class="btn btn-ghost" @onclick="() => _transferFrom = null">Hủy</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_qrScanOpen)
+{
+    <QrScannerModal OnCode="OnMemberQr" OnClose="() => _qrScanOpen = false" />
+}
+
+@code {
+    private List<TableDto> _tables = new();
+    private List<BookingDto> _pendingBookings = new();
+    private List<BookingDto> _expiredBookings = new();
+    private List<BookingDto> _confirmedBookings = new();
+    private readonly Dictionary<int, string> _staffCustomerNameByTable = new();
+    private bool _loading = true;
+
+    // Đợt 12: lọc danh sách bàn theo loại (tab trên đầu lưới bàn, theo mẫu Stitch).
+    private string? _tableTypeFilter;
+    private string ApiBaseUrl => (Configuration["Api:BaseUrl"] ?? "https://localhost:5001").TrimEnd('/');
+    private string? _message;
+    private HubConnection? _hubConnection;
+    private System.Threading.Timer? _tickTimer;
+
+    // Đợt 4: Gọi món & dịch vụ
+    private TableDto? _orderModalTable;
+    private List<InventoryItemDto> _quickAddItems = new();
+    private string _orderSearch = string.Empty;
+    private string? _orderCategory;
+    private readonly Dictionary<int, int> _quickAddQty = new();
+    private List<OrderDto> _sessionOrders = new();
+    private string _freeOrderName = string.Empty;
+    private decimal _freeOrderPrice;
+    private int _freeOrderQty = 1;
+    private string? _orderModalError;
+
+    // Đợt 4: Trả bàn kèm phụ thu
+    private TableDto? _checkoutModalTable;
+    private decimal? _checkoutSurchargeAmount;
+    private string? _checkoutSurchargeReason;
+    private string? _checkoutError;
+    private bool _checkoutBusy;
+
+    // Đợt 6: Thanh toán (bước 2 của Trả bàn) - Thẻ hội viên / Chuyển khoản / Tiền mặt
+    private int? _paymentModalSessionId;
+    private string _paymentModalTableName = string.Empty;
+    private TimeSpan _paymentModalDuration;
+    private decimal _paymentModalHourlyAmount;
+    private decimal _paymentModalOrdersAmount;
+    private decimal _paymentModalSurchargeAmount;
+    private decimal _paymentModalTotalAmount;
+    private string _paymentMethod = "Wallet";
+    private string _memberSearchQuery = string.Empty;
+    private List<MemberInfoDto> _memberSearchResults = new();
+    private MemberInfoDto? _selectedMember;
+    private decimal? _cashReceived;
+    private string? _paymentError;
+    private bool _paymentBusy;
+    private PaymentCompletedDto? _invoiceResult;
+
+    private const string PaymentMethodWallet = "Wallet";
+    private const string PaymentMethodBankTransfer = "BankTransfer";
+    private const string PaymentMethodCash = "Cash";
+
+    private void SetPaymentMethod(string method)
+    {
+        _paymentMethod = method;
+        _paymentError = null;
+        _bankTransferConfirmed = false;
+    }
+
+    private string PaymentTabClass(string method) =>
+        _paymentMethod == method ? "btn btn-primary btn-sm" : "btn btn-ghost btn-sm";
+
+    private static string PaymentMethodLabel(string method) => method switch
+    {
+        "Wallet" => "Thẻ hội viên (Ví)",
+        "Cash" => "Tiền mặt",
+        "BankTransfer" => "Chuyển khoản",
+        _ => method
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsStaffOrAdmin)
+        {
+            return;
+        }
+
+        await LoadAsync();
+        _clubSettings = await SettingsApiService.GetAsync();
+
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl($"{ApiBaseUrl}/hubs/bms")
+            .WithAutomaticReconnect(new ForeverRetryPolicy())
+            .Build();
+
+        // Mất kết nối rồi tự nối lại: tải lại dữ liệu vì các sự kiện phát ra lúc mất mạng đã bị lỡ.
+        _hubConnection.Reconnected += async _ =>
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        };
+
+        _hubConnection.On<TableStatusChangedEvent>("TableStatusChanged", async _ =>
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        });
+
+        _hubConnection.On<BookingExpiredEvent>("BookingExpired", async _ =>
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            await _hubConnection.StartAsync();
+        }
+        catch
+        {
+            // Falls back to manual refresh if the hub can't be reached yet.
+        }
+
+        if (AuthState.IsStaffOrAdmin)
+        {
+            _tickTimer = new System.Threading.Timer(async _ => await InvokeAsync(StateHasChanged),
+                null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _tables = await TableApiService.GetTablesAsync();
+        _loading = false;
+
+        foreach (var table in _tables)
+        {
+            if (!_staffCustomerNameByTable.ContainsKey(table.Id))
+            {
+                _staffCustomerNameByTable[table.Id] = string.Empty;
+            }
+        }
+
+        if (AuthState.IsStaffOrAdmin)
+        {
+            if (_slotsByType.Count == 0)
+            {
+                _slotsByType = (await TableApiService.GetTableTypesAsync())
+                    .ToDictionary(t => t.Name, t => t.Slots.Select(x => new TablePricing.Slot(x.StartTime, x.EndTime, x.PricePerHour)).ToList());
+            }
+            _pendingBookings = await TableApiService.GetPendingBookingsAsync();
+            _expiredBookings = await TableApiService.GetRecentExpiredBookingsAsync();
+            _confirmedBookings = await TableApiService.GetConfirmedBookingsAsync();
+        }
+    }
+
+    // Đợt 16: bàn trống đầu tiên (theo bộ lọc đang chọn) - đích của nút nổi "+ Mở bàn".
+    private int? _firstFreeTableId => _tables
+        .Where(t => _tableTypeFilter is null || t.TableTypeName == _tableTypeFilter)
+        .FirstOrDefault(t => t.Status == BMS.Shared.Dtos.TableStatus.Available)?.Id;
+
+    private async Task ScrollToFirstFree()
+    {
+        await JS.InvokeVoidAsync("eval",
+            "(() => { const c = document.getElementById('ban-trong'); if (!c) return; " +
+            "c.scrollIntoView({ behavior: 'smooth', block: 'center' }); " +
+            "const i = c.querySelector('input'); if (i) setTimeout(() => i.focus(), 400); })()");
+    }
+
+    // Đợt 16: gắn tag "VIP" vàng trước tên bàn (như Stitch) khi loại bàn có chữ "VIP".
+    private static bool IsVipType(string? tableTypeName) =>
+        !string.IsNullOrWhiteSpace(tableTypeName)
+        && tableTypeName.Contains("VIP", StringComparison.OrdinalIgnoreCase);
+
+    private static string StatusLabel(BMS.Shared.Dtos.TableStatus status) => status switch
+    {
+        BMS.Shared.Dtos.TableStatus.Available => "Trống",
+        BMS.Shared.Dtos.TableStatus.Occupied => "Đang chơi",
+        BMS.Shared.Dtos.TableStatus.Reserved => "Đã đặt",
+        BMS.Shared.Dtos.TableStatus.Maintenance => "Bảo trì",
+        _ => status.ToString()
+    };
+
+    private static string CountdownText(DateTime expiresAtUtc)
+    {
+        var remaining = expiresAtUtc - DateTime.UtcNow;
+        if (remaining <= TimeSpan.Zero) return "Đã hết hạn";
+        return $"còn {remaining.Minutes} phút {remaining.Seconds} giây";
+    }
+
+    private async Task ConfirmBooking(int bookingId)
+    {
+        var (success, error) = await TableApiService.ConfirmBookingAsync(bookingId);
+        _message = success ? "Đã giữ chỗ cho khách." : error;
+        await LoadAsync();
+    }
+
+    private async Task CheckInLate(int bookingId)
+    {
+        var (success, error) = await TableApiService.CheckInLateBookingAsync(bookingId);
+        _message = success ? "Đã nhận khách đến trễ." : error;
+        await LoadAsync();
+    }
+
+    private async Task CheckIn(int tableId)
+    {
+        var name = _staffCustomerNameByTable.TryGetValue(tableId, out var n) && !string.IsNullOrWhiteSpace(n)
+            ? n
+            : "Khách vãng lai";
+
+        var (success, error) = await TableApiService.CheckInAsync(tableId, name);
+        _message = success ? "Đã nhận bàn." : error;
+        await LoadAsync();
+    }
+
+    // Khách đã giữ chỗ (Confirmed) đến quầy - bắt đầu tính giờ chơi cho bàn Reserved đó.
+    // Hủy yêu cầu đặt bàn (đang chờ duyệt hoặc đã giữ chỗ) - bàn đang giữ được nhả ra.
+    private async Task CancelBooking(int bookingId, string customerName)
+    {
+        var (success, error) = await TableApiService.CancelBookingAsync(bookingId);
+        _message = success ? $"Đã hủy đặt bàn của {customerName}." : error;
+        await LoadAsync();
+    }
+
+    // ===== Chuyển bàn =====
+    private TableDto? _transferFrom;
+    private int _transferToId;
+    private string? _transferError;
+    private bool _transferBusy;
+
+    private void OpenTransferModal(TableDto table)
+    {
+        _transferFrom = table;
+        _transferToId = 0;
+        _transferError = null;
+    }
+
+    private async Task ConfirmTransfer()
+    {
+        if (_transferFrom is null || _transferToId == 0) return;
+        _transferBusy = true;
+        var target = _tables.FirstOrDefault(t => t.Id == _transferToId);
+        var (success, error) = await TableApiService.TransferAsync(_transferFrom.Id, _transferToId);
+        _transferBusy = false;
+        if (success)
+        {
+            _message = $"Đã chuyển khách từ {_transferFrom.Name} sang {target?.Name}.";
+            _transferFrom = null;
+            await LoadAsync();
+        }
+        else
+        {
+            _transferError = string.IsNullOrWhiteSpace(error) ? "Chuyển bàn thất bại." : error;
+        }
+    }
+
+    // ===== Tạm tính tiền giờ (cùng công thức với lúc chốt tiền: khung giờ VN, làm tròn 1.000đ) =====
+    private Dictionary<string, List<TablePricing.Slot>> _slotsByType = new();
+
+    private decimal EstimateHourlyAmount(TableDto table)
+    {
+        var slots = table.TableTypeName is not null && _slotsByType.TryGetValue(table.TableTypeName, out var s)
+            ? s
+            : new List<TablePricing.Slot>();
+        return TablePricing.HourlyAmount(table.ActiveSessionStartedAtUtc!.Value, ClockNow(table), slots, table.PricePerHour);
+    }
+
+    // Phiên đang tạm dừng: đồng hồ và tiền tạm tính đứng yên tại thời điểm tạm dừng.
+    private static DateTime ClockNow(TableDto table) => table.PausedAtUtc ?? DateTime.UtcNow;
+
+    // ===== Tạm dừng / chơi tiếp (không tính tiền giờ trong lúc tạm dừng) =====
+    private async Task PauseSession(TableDto table)
+    {
+        if (table.ActiveSessionId is not int sessionId) return;
+        var (success, error) = await TableApiService.PauseSessionAsync(sessionId);
+        _message = success ? $"Đã tạm dừng tính giờ {table.Name}." : error;
+        await LoadAsync();
+    }
+
+    private async Task ResumeSession(TableDto table)
+    {
+        if (table.ActiveSessionId is not int sessionId) return;
+        var (success, error) = await TableApiService.ResumeSessionAsync(sessionId);
+        _message = success ? $"{table.Name} tiếp tục tính giờ." : error;
+        await LoadAsync();
+    }
+
+    private async Task CheckInReserved(int tableId, string customerName, int bookingId)
+    {
+        var (success, error) = await TableApiService.CheckInAsync(tableId, customerName, bookingId);
+        _message = success ? "Đã nhận khách, bắt đầu tính giờ." : error;
+        await LoadAsync();
+    }
+
+    // --- Đợt 4: Gọi món & dịch vụ ---
+
+    private async Task OpenOrderModal(TableDto table)
+    {
+        _orderModalTable = table;
+        _orderModalError = null;
+        _freeOrderName = string.Empty;
+        _freeOrderPrice = 0;
+        _freeOrderQty = 1;
+
+        _quickAddItems = await OrderApiService.GetQuickAddInventoryAsync();
+        foreach (var item in _quickAddItems)
+        {
+            if (!_quickAddQty.ContainsKey(item.Id))
+            {
+                _quickAddQty[item.Id] = 1;
+            }
+        }
+
+        await ReloadSessionOrders();
+    }
+
+    private async Task ReloadSessionOrders()
+    {
+        if (_orderModalTable?.ActiveSessionId is int sessionId)
+        {
+            _sessionOrders = await OrderApiService.GetSessionOrdersAsync(sessionId);
+        }
+        else
+        {
+            _sessionOrders = new();
+        }
+    }
+
+    private void CloseOrderModal()
+    {
+        _orderModalTable = null;
+    }
+
+    private async Task AddQuickOrder(InventoryItemDto item)
+    {
+        if (_orderModalTable?.ActiveSessionId is not int sessionId) return;
+
+        var qty = _quickAddQty.TryGetValue(item.Id, out var q) && q > 0 ? q : 1;
+        var (success, error) = await OrderApiService.AddOrderAsync(sessionId,
+            new AddOrderRequestDto(item.Name, item.UnitPrice ?? 0, qty, item.Id));
+
+        if (success)
+        {
+            _orderModalError = null;
+            await ReloadSessionOrders();
+        }
+        else
+        {
+            _orderModalError = error;
+        }
+    }
+
+    private async Task AddFreeOrder()
+    {
+        if (_orderModalTable?.ActiveSessionId is not int sessionId) return;
+
+        if (string.IsNullOrWhiteSpace(_freeOrderName) || _freeOrderQty <= 0)
+        {
+            _orderModalError = "Vui lòng nhập tên dịch vụ và số lượng hợp lệ.";
+            return;
+        }
+
+        var (success, error) = await OrderApiService.AddOrderAsync(sessionId,
+            new AddOrderRequestDto(_freeOrderName, _freeOrderPrice, _freeOrderQty, null));
+
+        if (success)
+        {
+            _orderModalError = null;
+            _freeOrderName = string.Empty;
+            _freeOrderPrice = 0;
+            _freeOrderQty = 1;
+            await ReloadSessionOrders();
+        }
+        else
+        {
+            _orderModalError = error;
+        }
+    }
+
+    private async Task RemoveOrder(int orderId)
+    {
+        var (success, error) = await OrderApiService.DeleteOrderAsync(orderId);
+        _orderModalError = success ? null : error;
+        await ReloadSessionOrders();
+    }
+
+    // --- Đợt 4: Trả bàn kèm phụ thu ---
+
+    private void OpenCheckoutModal(TableDto table)
+    {
+        _checkoutModalTable = table;
+        _checkoutSurchargeAmount = null;
+        _checkoutSurchargeReason = null;
+        _checkoutError = null;
+    }
+
+    private void CloseCheckoutModal()
+    {
+        _checkoutModalTable = null;
+    }
+
+    private async Task ConfirmCheckOut()
+    {
+        if (_checkoutModalTable is null) return;
+
+        _checkoutBusy = true;
+        _checkoutError = null;
+
+        var (success, result, error) = await TableApiService.CheckOutAsync(
+            _checkoutModalTable.Id, _checkoutSurchargeAmount, _checkoutSurchargeReason);
+
+        _checkoutBusy = false;
+
+        if (success && result is not null)
+        {
+            // Đợt 6: "Trả bàn" chỉ dừng đồng hồ - đóng modal phụ thu và mở ngay modal chọn
+            // phương thức thanh toán với các số tiền đã chốt (không cần gọi API lại).
+            var tableName = _checkoutModalTable.Name;
+            _checkoutModalTable = null;
+            OpenPaymentModal(result.SessionId, tableName, result.Duration, result.HourlyAmount,
+                result.OrdersAmount, result.SurchargeAmount, result.TotalAmount);
+            await LoadAsync();
+        }
+        else
+        {
+            _checkoutError = error;
+        }
+    }
+
+    // --- Đợt 6: Thanh toán (bước 2 của Trả bàn) ---
+
+    private void OpenPaymentModal(int sessionId, string tableName, TimeSpan duration, decimal hourlyAmount,
+        decimal ordersAmount, decimal surchargeAmount, decimal totalAmount)
+    {
+        _paymentModalSessionId = sessionId;
+        _paymentModalTableName = tableName;
+        _paymentModalDuration = duration;
+        _paymentModalHourlyAmount = hourlyAmount;
+        _paymentModalOrdersAmount = ordersAmount;
+        _paymentModalSurchargeAmount = surchargeAmount;
+        _paymentModalTotalAmount = totalAmount;
+        _paymentMethod = "Wallet";
+        _memberSearchQuery = string.Empty;
+        _memberSearchResults = new();
+        _selectedMember = null;
+        _cashReceived = null;
+        _paymentError = null;
+        _invoiceResult = null;
+        _appliedDiscountRequestId = null;
+        _appliedDiscountAmount = 0m;
+        _appliedDiscountPercent = 0m;
+        _discountPercent = null;
+        _discountReason = null;
+        _discountStatus = null;
+        _discountError = null;
+        _bankTransferConfirmed = false;
+    }
+
+    private async Task OpenPaymentModalForPendingSession(int sessionId, string tableName)
+    {
+        var (success, result, error) = await TableApiService.GetCheckoutSummaryAsync(sessionId);
+        if (success && result is not null)
+        {
+            OpenPaymentModal(sessionId, tableName, result.Duration, result.HourlyAmount,
+                result.OrdersAmount, result.SurchargeAmount, result.TotalAmount);
+        }
+        else
+        {
+            _message = error;
+        }
+    }
+
+    private void ClosePaymentModal()
+    {
+        _paymentModalSessionId = null;
+    }
+
+    private async Task SearchMembers()
+    {
+        _memberSearchResults = await WalletApiService.FindMembersAsync(_memberSearchQuery);
+    }
+
+    // Quét mã QR hội viên (mã có chữ ký + hạn dùng, máy chủ xác thực) -> chọn hội viên.
+    private bool _qrScanOpen;
+
+    private async Task OnMemberQr(string code)
+    {
+        _qrScanOpen = false;
+        var (member, error) = await WalletApiService.FindMemberByQrAsync(code);
+        if (member is not null)
+        {
+            _selectedMember = member;
+            _memberSearchResults = new();
+            _paymentError = null;
+        }
+        else
+        {
+            _paymentError = error;
+        }
+        StateHasChanged();
+    }
+
+    private void SelectMember(MemberInfoDto member)
+    {
+        _selectedMember = member;
+    }
+
+    private decimal ChangeAmount => (_cashReceived ?? 0m) - EffectiveTotalAmount;
+
+    private bool IsCashMethodInsufficient => _paymentMethod == PaymentMethodCash && ChangeAmount < 0;
+
+    // Đợt 10: hệ thống chưa có webhook ngân hàng thật nên không thể tự biết tiền đã về -
+    // bắt buộc nhân viên tự kiểm tra và tick xác nhận trước khi được hoàn tất thanh toán
+    // bằng Chuyển khoản, tránh bấm "Xác nhận" nhầm khi khách chưa thực sự chuyển tiền.
+    private bool _bankTransferConfirmed;
+    private bool IsBankTransferNotConfirmed => _paymentMethod == PaymentMethodBankTransfer && !_bankTransferConfirmed;
+
+    private bool PaymentConfirmDisabled => _paymentBusy || IsCashMethodInsufficient || IsBankTransferNotConfirmed;
+
+    // Đợt 10: QR VietQR động - số tiền + nội dung tự điền sẵn, khách quét bằng app ngân
+    // hàng bất kỳ hỗ trợ VietQR. Ngân hàng (BIN), số tài khoản, tên chủ tài khoản lấy từ
+    // trang "Cấu hình chung" (Admin); chưa cấu hình tài khoản thì ẩn mã QR ngân hàng.
+    private ClubSettingsDto _clubSettings = new();
+
+    private string? BankQrImageUrl
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_clubSettings.BankBin) || string.IsNullOrWhiteSpace(_clubSettings.BankAccountNumber)) return null;
+            var amount = (long)Math.Round(EffectiveTotalAmount, 0, MidpointRounding.AwayFromZero);
+            var content = Uri.EscapeDataString($"TT {_paymentModalTableName}");
+            var name = Uri.EscapeDataString(_clubSettings.BankAccountName ?? "");
+            return $"https://img.vietqr.io/image/{_clubSettings.BankBin}-{_clubSettings.BankAccountNumber}-compact2.png?amount={amount}&addInfo={content}&accountName={name}";
+        }
+    }
+
+    // Đợt 9: Giảm giá khi thanh toán.
+    private int? _appliedDiscountRequestId;
+    private decimal _appliedDiscountAmount;
+    private decimal _appliedDiscountPercent;
+    private decimal? _discountPercent;
+    private string? _discountReason;
+    private string? _discountStatus;
+    private string? _discountError;
+    private bool _discountBusy;
+
+    private decimal EffectiveTotalAmount => Math.Max(0, _paymentModalTotalAmount - _appliedDiscountAmount);
+
+    private async Task RequestDiscount()
+    {
+        if (_paymentModalSessionId is not int sessionId) return;
+        if (_discountPercent is not decimal percent || percent <= 0)
+        {
+            _discountError = "Vui lòng nhập % giảm giá hợp lệ.";
+            return;
+        }
+
+        _discountBusy = true;
+        _discountError = null;
+
+        var (success, result, error) = await TableApiService.CreateDiscountRequestAsync(sessionId, percent, _discountReason);
+
+        _discountBusy = false;
+
+        if (success && result is not null)
+        {
+            if (result.Status == "Approved")
+            {
+                _appliedDiscountRequestId = result.Id;
+                _appliedDiscountAmount = result.DiscountAmount;
+                _appliedDiscountPercent = result.DiscountPercent;
+                _discountStatus = null;
+            }
+            else
+            {
+                _discountStatus = result.Status;
+            }
+        }
+        else
+        {
+            _discountError = error;
+        }
+    }
+
+    private async Task CheckDiscountStatus()
+    {
+        if (_paymentModalSessionId is not int sessionId) return;
+
+        var result = await TableApiService.GetDiscountStatusAsync(sessionId);
+        if (result is null) return;
+
+        if (result.Status == "Approved")
+        {
+            _appliedDiscountRequestId = result.Id;
+            _appliedDiscountAmount = result.DiscountAmount;
+            _appliedDiscountPercent = result.DiscountPercent;
+            _discountStatus = null;
+        }
+        else
+        {
+            _discountStatus = result.Status;
+        }
+    }
+
+    private async Task ConfirmPayment()
+    {
+        if (_paymentModalSessionId is not int sessionId) return;
+
+        if (_paymentMethod == "Wallet" && _selectedMember is null)
+        {
+            _paymentError = "Vui lòng chọn hội viên để thanh toán bằng Thẻ hội viên.";
+            return;
+        }
+
+        if (_paymentMethod == "Cash" && (_cashReceived is null || _cashReceived.Value < EffectiveTotalAmount))
+        {
+            _paymentError = "Số tiền khách đưa không đủ.";
+            return;
+        }
+
+        if (_paymentMethod == PaymentMethodBankTransfer && !_bankTransferConfirmed)
+        {
+            _paymentError = "Vui lòng tích xác nhận đã nhận tiền chuyển khoản trước khi hoàn tất.";
+            return;
+        }
+
+        _paymentBusy = true;
+        _paymentError = null;
+
+        var (success, result, error) = await TableApiService.CompletePaymentAsync(
+            sessionId, _paymentMethod, _selectedMember?.AccountId,
+            _paymentMethod == "Cash" ? _cashReceived : null, _appliedDiscountRequestId);
+
+        _paymentBusy = false;
+
+        if (success && result is not null)
+        {
+            _invoiceResult = result;
+            _paymentModalSessionId = null;
+            await LoadAsync();
+        }
+        else
+        {
+            _paymentError = error;
+        }
+    }
+
+    private async Task PrintInvoice()
+    {
+        await JS.InvokeVoidAsync("print");
+    }
+
+    private async Task CloseInvoice()
+    {
+        _invoiceResult = null;
+        await LoadAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _tickTimer?.Dispose();
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
+}

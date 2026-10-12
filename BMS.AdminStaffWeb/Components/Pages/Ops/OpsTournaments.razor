@@ -1,0 +1,199 @@
+@page "/ops/tournaments"
+@rendermode InteractiveServer
+@inject TournamentApiService TournamentApiService
+@inject AuthState AuthState
+@inject IConfiguration Configuration
+@implements IAsyncDisposable
+@using Microsoft.AspNetCore.SignalR.Client
+
+<h1><Icon Name="trophy" Size="22" /> Giải đấu</h1>
+
+@if (!AuthState.IsStaffOrAdmin)
+{
+    <p class="page-empty">Vui lòng đăng nhập bằng tài khoản Nhân viên hoặc Admin.</p>
+    return;
+}
+
+@if (_loading)
+{
+    <p>Đang tải...</p>
+}
+else if (_tournaments.Count == 0)
+{
+    <p class="page-empty">Hiện chưa có giải đấu nào.</p>
+}
+else
+{
+    @* Đợt 16: card giải đấu cùng mẫu card Stitch tinh gọn (khung ảnh inset + nhãn trạng thái
+       nổi, dòng phụ in hoa, tiêu đề 20px, lệ phí lớn + nút hành động bên phải). *@
+    <div class="cue-grid">
+        @foreach (var t in _tournaments)
+        {
+            <div class="cue-card tour-card">
+                <div class="cue-media">
+                    @if (!string.IsNullOrEmpty(t.ImageUrl))
+                    {
+                        <img src="@t.ImageUrl" alt="@t.Name" />
+                    }
+                    else
+                    {
+                        <Icon Name="emoji_events" Size="44" />
+                    }
+                    <span class="cue-media-tag">
+                        <span class="cue-media-tag-dot @(t.Status == "Open" ? "" : t.Status == "Draft" ? "is-off" : "is-gold")"></span>
+                        @StatusLabel(t.Status)
+                    </span>
+                    <span class="cue-media-spec">
+                        @t.RegisteredCount@(t.MaxParticipants is not null ? $"/{t.MaxParticipants}" : "") cơ thủ@(t.IsFull ? " · Đã đủ" : "")
+                    </span>
+                </div>
+                <div class="cue-body">
+                    <div class="cue-eyebrow-row">
+                        <span class="cue-eyebrow">Giải đấu</span>
+                        <span class="cue-eyebrow-right">@t.StartDateUtc.ToLocalTime().ToString("dd/MM") - @t.EndDateUtc.ToLocalTime().ToString("dd/MM/yyyy")</span>
+                    </div>
+                    <h3 class="cue-title">@t.Name</h3>
+                    @if (!string.IsNullOrWhiteSpace(t.Description))
+                    {
+                        <p class="tcard-sub">@t.Description</p>
+                    }
+                    <div class="cue-price-row">
+                        <div class="cue-price">
+                            <span class="cue-price-value">@t.EntryFee.ToString("N0")đ</span>
+                            <span class="cue-price-unit">lệ phí</span>
+                        </div>
+                    </div>
+                </div>
+
+                @if (t.Status == "InProgress" || t.Status == "Completed")
+                {
+                    <button class="btn btn-ghost btn-sm" @onclick="() => ToggleBracket(t)">
+                        @(_bracketTournamentId == t.Id ? "Ẩn bảng đấu" : "Xem bảng đấu")
+                    </button>
+
+                    @if (_bracketTournamentId == t.Id)
+                    {
+                        @if (_bracketMatches.Count == 0)
+                        {
+                            <p class="page-empty">Chưa có bảng đấu.</p>
+                        }
+                        else
+                        {
+                            <div class="bracket-wrap">
+                                @foreach (var round in _bracketMatches.GroupBy(m => m.Round).OrderBy(g => g.Key))
+                                {
+                                    <div class="bracket-round">
+                                        <div class="bracket-round-title">Vòng @round.Key</div>
+                                        @foreach (var match in round.OrderBy(m => m.SlotInRound))
+                                        {
+                                            <div class="bracket-match">
+                                                <div class="bracket-player">
+                                                    <span class="@(match.Status == "Completed" && match.WinnerRegistrationId == match.Player1RegistrationId ? "bracket-winner" : "")">
+                                                        @(match.Player1Name ?? "Chưa xác định")
+                                                    </span>
+                                                </div>
+                                                <div class="bracket-player">
+                                                    <span class="@(match.Status == "Completed" && match.WinnerRegistrationId == match.Player2RegistrationId ? "bracket-winner" : "")">
+                                                        @(match.Player2Name ?? "Chưa xác định")
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    }
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<TournamentDto> _tournaments = new();
+    private bool _loading = true;
+    private HubConnection? _hubConnection;
+
+    // Đợt 9: Bảng đấu loại trực tiếp - Player chỉ xem.
+    private int? _bracketTournamentId;
+    private List<TournamentMatchDto> _bracketMatches = new();
+
+    private string ApiBaseUrl => (Configuration["Api:BaseUrl"] ?? "https://localhost:5001").TrimEnd('/');
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsStaffOrAdmin)
+        {
+            return;
+        }
+
+        await LoadAsync();
+
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl($"{ApiBaseUrl}/hubs/bms")
+            .WithAutomaticReconnect(new ForeverRetryPolicy())
+            .Build();
+
+        // Mất kết nối rồi tự nối lại: tải lại dữ liệu vì các sự kiện phát ra lúc mất mạng đã bị lỡ.
+        _hubConnection.Reconnected += async _ =>
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        };
+
+        _hubConnection.On<object>("TournamentUpdated", async _ =>
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            await _hubConnection.StartAsync();
+        }
+        catch
+        {
+            // Falls back to manual refresh if the hub isn't reachable yet.
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        // Nhân viên/Admin xem cả giải ở trạng thái Nháp (như chế độ nhân viên trước đây).
+        _tournaments = await TournamentApiService.GetTournamentsAsync();
+
+        _loading = false;
+    }
+
+    private static string StatusLabel(string status) => status switch
+    {
+        "Open" => "Mở đăng ký",
+        "InProgress" => "Đang diễn ra",
+        "Completed" => "Đã kết thúc",
+        "Cancelled" => "Đã hủy",
+        _ => "Nháp"
+    };
+
+    private async Task ToggleBracket(TournamentDto t)
+    {
+        if (_bracketTournamentId == t.Id)
+        {
+            _bracketTournamentId = null;
+            _bracketMatches = new();
+            return;
+        }
+
+        _bracketTournamentId = t.Id;
+        _bracketMatches = await TournamentApiService.GetBracketAsync(t.Id);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
+}

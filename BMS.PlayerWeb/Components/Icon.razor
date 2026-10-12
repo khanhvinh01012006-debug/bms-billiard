@@ -1,0 +1,44 @@
+@* Đợt 13: đổi từ SVG tự vẽ sang font icon "Material Symbols Outlined" - ĐÚNG như file
+   Stitch thật xuất ra (class="material-symbols-outlined", icon dạng chữ ligature). Giữ
+   nguyên tên tham số (Name/Size/Class) để không phải sửa lại các trang đã dùng <Icon />. *@
+
+<span class="material-symbols-outlined icon @Class" style="font-size:@(Size)px; width:@(Size)px; height:@(Size)px;" aria-hidden="true">@Symbol</span>
+
+@code {
+    /// <summary>Tên icon dùng chung trong BMS: table, cue, trophy, wallet, user, chat, card,
+    /// clock, target, users, money, close, attach, play, food, check. Được map sang tên ligature thật của
+    /// Material Symbols Outlined (đúng như Stitch dùng).</summary>
+    [Parameter, EditorRequired] public string Name { get; set; } = string.Empty;
+
+    [Parameter] public int Size { get; set; } = 18;
+
+    [Parameter] public string Class { get; set; } = string.Empty;
+
+    private string Symbol => Name switch
+    {
+        "table" => "table_bar",
+        "cue" => "sports_martial_arts",
+        "trophy" => "emoji_events",
+        "wallet" => "account_balance_wallet",
+        "user" => "person",
+        "chat" => "chat",
+        "card" => "credit_card",
+        "clock" => "schedule",
+        "target" => "sports_score",
+        "users" => "group",
+        "money" => "payments",
+        "close" => "close",
+        "attach" => "attach_file",
+        "play" => "play_arrow",
+        "food" => "restaurant_menu",
+        "check" => "check_circle",
+        "grid" => "dashboard",
+        "bag" => "shopping_bag",
+        "logout" => "logout",
+        "history" => "history",
+        "arrow" => "arrow_forward",
+        "cart" => "shopping_cart",
+        "search" => "search",
+        _ => Name,
+    };
+}

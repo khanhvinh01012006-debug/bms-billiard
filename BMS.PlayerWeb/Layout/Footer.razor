@@ -1,0 +1,115 @@
+@* Đợt 8: Footer chung cho toàn site (Người chơi + Nhân viên) - thông tin liên hệ thật do
+   chủ quán cung cấp. Địa chỉ / email doanh nghiệp / website đang chờ cung cấp nên hiển thị
+   rõ là "Đang cập nhật" - KHÔNG bịa thông tin. Không có Zalo vì chưa được cung cấp. *@
+
+@inject IConfiguration Configuration
+@inject HttpClient Http
+
+<footer class="site-footer">
+    <div class="footer-grid">
+        <div class="footer-col">
+            <span class="footer-brand">
+                <img src="images/logo-mark.svg" width="20" height="20" alt="" />
+                @_s.ClubName
+            </span>
+            <p class="footer-text">Quản lý bàn chơi, đặt bàn, thuê/mua cơ và ghép trận - tất cả trong một hệ thống.</p>
+        </div>
+
+        <div class="footer-col">
+            <h3 class="footer-heading">Liên hệ</h3>
+            <ul class="footer-list">
+                <li>
+                    <span class="footer-label">Hotline:</span>
+                    @if (!string.IsNullOrWhiteSpace(_s.Hotline))
+                    {
+                        <a href="tel:@(new string(_s.Hotline.Where(c => char.IsDigit(c) || c == '+').ToArray()))">@_s.Hotline</a>
+                    }
+                    else
+                    {
+                        <span class="footer-placeholder">Đang cập nhật</span>
+                    }
+                </li>
+                <li>
+                    <span class="footer-label">Email:</span>
+                    @if (!string.IsNullOrWhiteSpace(_s.Email))
+                    {
+                        <a href="mailto:@_s.Email">@_s.Email</a>
+                    }
+                    else
+                    {
+                        <span class="footer-placeholder">Đang cập nhật</span>
+                    }
+                </li>
+                <li>
+                    <span class="footer-label">Facebook:</span>
+                    @if (!string.IsNullOrWhiteSpace(_s.FacebookUrl))
+                    {
+                        <a href="@_s.FacebookUrl" target="_blank" rel="noopener noreferrer">@ShortUrl(_s.FacebookUrl)</a>
+                    }
+                    else
+                    {
+                        <span class="footer-placeholder">Đang cập nhật</span>
+                    }
+                </li>
+            </ul>
+        </div>
+
+        <div class="footer-col">
+            <h3 class="footer-heading">Địa chỉ &amp; Bản đồ</h3>
+            <ul class="footer-list">
+                <li>
+                    <span class="footer-label">Địa chỉ:</span>
+                    @if (!string.IsNullOrWhiteSpace(_s.Address))
+                    {
+                        <a href="https://www.google.com/maps/search/?api=1&query=@Uri.EscapeDataString(_s.Address)" target="_blank" rel="noopener noreferrer">@_s.Address</a>
+                    }
+                    else
+                    {
+                        <span class="footer-placeholder">Đang cập nhật</span>
+                    }
+                </li>
+                <li>
+                    <span class="footer-label">Website:</span>
+                    @if (!string.IsNullOrWhiteSpace(_s.Website))
+                    {
+                        <a href="@_s.Website" target="_blank" rel="noopener noreferrer">@ShortUrl(_s.Website)</a>
+                    }
+                    else
+                    {
+                        <span class="footer-placeholder">Đang cập nhật</span>
+                    }
+                </li>
+                <li>
+                    <span class="footer-label">Email doanh nghiệp:</span>
+                    <span class="footer-placeholder">Đang cập nhật</span>
+                </li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="footer-bottom">
+        <span>© @DateTime.Now.Year @_s.ClubName. Đã đăng ký bản quyền.</span>
+        <a class="footer-staff-link" href="@StaffPortalUrl" rel="nofollow">Dành cho nhân viên</a>
+    </div>
+</footer>
+
+@code {
+    // Thông tin liên hệ lấy từ "Cấu hình chung" (Admin); lỗi mạng thì dùng giá trị mặc định.
+    private ClubSettingsDto _s = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _s = await Http.GetFromJsonAsync<ClubSettingsDto>("api/settings") ?? _s;
+        }
+        catch
+        {
+            // giữ mặc định
+        }
+    }
+
+    private static string ShortUrl(string url) => url.Replace("https://", "").Replace("http://", "").Replace("www.", "").TrimEnd('/');
+
+    private string StaffPortalUrl => Configuration["StaffPortal:Url"] ?? "https://localhost:5101";
+}

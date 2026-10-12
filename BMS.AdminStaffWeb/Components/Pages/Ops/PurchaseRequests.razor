@@ -1,0 +1,166 @@
+@page "/ops/purchase-requests"
+@rendermode InteractiveServer
+@inject CueApiService CueApiService
+@inject AuthState AuthState
+@inject IConfiguration Configuration
+@implements IAsyncDisposable
+@using Microsoft.AspNetCore.SignalR.Client
+
+@* Xử lý yêu cầu mua cơ / phụ kiện mà khách gửi ở trang Thuê & Mua Cơ ("Đặt mua").
+   Chờ xử lý -> Đã liên hệ -> Đã bán (trừ 1 vào tồn kho) hoặc Đã hủy. *@
+
+<h1><Icon Name="shopping_bag" Size="22" /> Yêu cầu mua cơ</h1>
+
+@if (!AuthState.IsStaffOrAdmin)
+{
+    <p class="page-empty">Vui lòng đăng nhập bằng tài khoản Nhân viên hoặc Admin.</p>
+    return;
+}
+
+<section class="filter-chip-row">
+    <button class="filter-chip @(_onlyOpen ? "filter-chip-active" : "")" @onclick="() => _onlyOpen = true">Cần xử lý (@_requests.Count(IsOpen))</button>
+    <button class="filter-chip @(!_onlyOpen ? "filter-chip-active" : "")" @onclick="() => _onlyOpen = false">Tất cả (@_requests.Count)</button>
+</section>
+
+@{
+    var shown = _requests.Where(r => !_onlyOpen || IsOpen(r)).ToList();
+}
+@if (_loading)
+{
+    <p>Đang tải...</p>
+}
+else if (shown.Count == 0)
+{
+    <p class="page-empty">@(_onlyOpen ? "Không có yêu cầu mua nào cần xử lý." : "Chưa có yêu cầu mua nào.")</p>
+}
+else
+{
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Thời gian</th>
+                <th>Khách</th>
+                <th>Số điện thoại</th>
+                <th>Sản phẩm</th>
+                <th>Giá bán</th>
+                <th>Tồn</th>
+                <th>Trạng thái</th>
+                <th>Xử lý</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var r in shown)
+            {
+                <tr>
+                    <td>@r.CreatedAtUtc.ToLocalTime().ToString("HH:mm dd/MM")</td>
+                    <td>@r.CustomerName</td>
+                    <td><a href="tel:@r.PhoneNumber">@r.PhoneNumber</a></td>
+                    <td>@r.CueName</td>
+                    <td>@(r.SalePrice?.ToString("N0") ?? "—") đ</td>
+                    <td>@r.AvailableCount</td>
+                    <td><span class="status-pill purchase-status-@r.Status.ToLowerInvariant()">@StatusLabel(r.Status)</span></td>
+                    <td class="row-actions">
+                        @if (r.Status == "Pending")
+                        {
+                            <button class="btn btn-ghost btn-sm" @onclick='() => SetStatus(r, "Contacted")' disabled="@_busy">Đã liên hệ</button>
+                        }
+                        @if (IsOpen(r))
+                        {
+                            <button class="btn btn-primary btn-sm" @onclick='() => SetStatus(r, "Completed")' disabled="@(_busy || r.AvailableCount <= 0)">Đã bán</button>
+                            <button class="btn btn-danger btn-sm" @onclick='() => SetStatus(r, "Cancelled")' disabled="@_busy">Hủy</button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@if (!string.IsNullOrEmpty(_message))
+{
+    <p class="toast-msg" @key="_message" role="status">@_message</p>
+}
+
+@code {
+    private List<CuePurchaseRequestDto> _requests = new();
+    private bool _loading = true;
+    private bool _onlyOpen = true;
+    private bool _busy;
+    private string? _message;
+    private HubConnection? _hubConnection;
+
+    private string ApiBaseUrl => (Configuration["Api:BaseUrl"] ?? "https://localhost:5001").TrimEnd('/');
+
+    private static bool IsOpen(CuePurchaseRequestDto r) => r.Status is "Pending" or "Contacted";
+
+    private static string StatusLabel(string status) => status switch
+    {
+        "Pending" => "Chờ xử lý",
+        "Contacted" => "Đã liên hệ",
+        "Completed" => "Đã bán",
+        "Cancelled" => "Đã hủy",
+        _ => status
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsStaffOrAdmin)
+        {
+            return;
+        }
+
+        await LoadAsync();
+
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl($"{ApiBaseUrl}/hubs/bms")
+            .WithAutomaticReconnect(new ForeverRetryPolicy())
+            .Build();
+
+        // Mất kết nối rồi tự nối lại: tải lại dữ liệu vì các sự kiện phát ra lúc mất mạng đã bị lỡ.
+        _hubConnection.Reconnected += async _ =>
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        };
+
+        _hubConnection.On<object>("CuePurchaseRequestChanged", async _ =>
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            await _hubConnection.StartAsync();
+        }
+        catch
+        {
+            // Falls back to manual refresh if the hub isn't reachable yet.
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _requests = await CueApiService.GetPurchaseRequestsAsync();
+        _loading = false;
+    }
+
+    private async Task SetStatus(CuePurchaseRequestDto r, string status)
+    {
+        _busy = true;
+        var (success, error) = await CueApiService.UpdatePurchaseRequestStatusAsync(r.Id, status);
+        _busy = false;
+        _message = success
+            ? $"Đã cập nhật yêu cầu của {r.CustomerName}: {StatusLabel(status)}."
+            : (string.IsNullOrWhiteSpace(error) ? "Cập nhật thất bại." : error);
+        await LoadAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
+}

@@ -1,0 +1,82 @@
+@page "/shifts"
+@rendermode InteractiveServer
+@inject ShiftApiService ShiftApiService
+@inject AccountApiService AccountApiService
+@inject AuthState AuthState
+
+<h1><Icon Name="shift" Size="22" /> Lịch sử Ca làm việc</h1>
+
+@if (!AuthState.IsAdmin)
+{
+    <p class="page-empty">Bạn không có quyền truy cập trang này. Vui lòng đăng nhập bằng tài khoản Admin.</p>
+}
+else
+{
+    <div class="form-actions filter-bar">
+        <select class="input" @bind="_filterStaffId" @bind:after="LoadAsync">
+            <option value="">-- Tất cả nhân viên --</option>
+            @foreach (var s in _staffList)
+            {
+                <option value="@s.Id">@s.FullName</option>
+            }
+        </select>
+    </div>
+
+    @if (_shifts.Count == 0)
+    {
+        <p class="page-empty">Chưa có ca làm việc nào.</p>
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Nhân viên</th>
+                    <th>Bắt đầu</th>
+                    <th>Kết thúc</th>
+                    <th>Quỹ đầu ca</th>
+                    <th>Quỹ cuối ca</th>
+                    <th>Ghi chú bàn giao</th>
+                    <th>Trạng thái</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var s in _shifts)
+                {
+                    <tr>
+                        <td>@s.StaffName</td>
+                        <td>@s.StartedAtUtc.ToLocalTime().ToString("HH:mm dd/MM/yyyy")</td>
+                        <td>@(s.EndedAtUtc?.ToLocalTime().ToString("HH:mm dd/MM/yyyy") ?? "—")</td>
+                        <td>@s.OpeningCashAmount.ToString("N0") đ</td>
+                        <td>@(s.ClosingCashAmount?.ToString("N0") ?? "—") đ</td>
+                        <td>@(s.HandoverNote ?? "—")</td>
+                        <td>@(s.Status == "Active" ? "Đang mở" : "Đã đóng")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+@code {
+    private List<ShiftDto> _shifts = new();
+    private List<StaffAccountDto> _staffList = new();
+    private string _filterStaffId = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsAdmin)
+        {
+            return;
+        }
+
+        _staffList = await AccountApiService.GetStaffListAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        int? staffId = int.TryParse(_filterStaffId, out var id) ? id : null;
+        _shifts = await ShiftApiService.GetAllAsync(staffId);
+    }
+}

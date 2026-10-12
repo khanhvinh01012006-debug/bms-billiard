@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="BMS.PlayerApp.LoginPage"
+             Title="Đăng nhập">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="20" Spacing="12">
+            <Label Text="Đăng nhập" FontSize="24" FontAttributes="Bold" TextColor="{StaticResource FeltDark}" />
+            <Label Text="Nhân viên và người chơi dùng chung màn hình này." FontSize="13" />
+
+            <Entry x:Name="EmailEntry" Placeholder="Email" Keyboard="Email" />
+
+            <Grid ColumnDefinitions="*,Auto">
+                <Entry x:Name="PasswordEntry" Grid.Column="0" Placeholder="Mật khẩu" IsPassword="True" />
+                <Button x:Name="TogglePasswordButton" Grid.Column="1" Text="Hiện" Clicked="OnTogglePasswordClicked" />
+            </Grid>
+
+            <Label x:Name="ErrorLabel" Style="{StaticResource ErrorText}" IsVisible="False" />
+
+            <Button Text="Đăng nhập" Clicked="OnLoginClicked" />
+            <Button Text="Quên mật khẩu?" BackgroundColor="Transparent" TextColor="{StaticResource FeltDark}" Clicked="OnGoToForgotPasswordClicked" />
+            <Button Text="Chưa có tài khoản? Đăng ký" BackgroundColor="Transparent" TextColor="{StaticResource FeltDark}" Clicked="OnGoToRegisterClicked" />
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>

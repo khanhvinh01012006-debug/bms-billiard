@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="BMS.PlayerApp.MatchesPage"
+             Title="Ghép trận">
+
+    <Grid RowDefinitions="Auto,Auto,Auto,*" Padding="16" RowSpacing="10">
+
+        <Label Grid.Row="0" Text="Ghép trận theo ELO" FontSize="22" FontAttributes="Bold" TextColor="{StaticResource FeltDark}" />
+
+        <Picker Grid.Row="1" x:Name="PlayerPicker" Title="Chọn người chơi" SelectedIndexChanged="OnPlayerSelected" />
+
+        <Label Grid.Row="2" Text="Đối thủ gợi ý" FontAttributes="Bold" />
+
+        <RefreshView Grid.Row="3" x:Name="SuggestionsRefreshView" Refreshing="OnRefreshing">
+            <CollectionView x:Name="SuggestionsCollectionView">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <Frame Margin="0,4">
+                            <HorizontalStackLayout Spacing="10">
+                                <VerticalStackLayout>
+                                    <Label Text="{Binding DisplayName}" FontAttributes="Bold" />
+                                    <Label Text="{Binding EloLabel}" FontSize="12" />
+                                </VerticalStackLayout>
+                                <Button Text="Gửi lời mời" Clicked="OnInviteClicked" CommandParameter="{Binding Id}" />
+                            </HorizontalStackLayout>
+                        </Frame>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+        </RefreshView>
+    </Grid>
+
+</ContentPage>

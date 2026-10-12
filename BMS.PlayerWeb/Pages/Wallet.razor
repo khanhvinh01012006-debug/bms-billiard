@@ -1,0 +1,390 @@
+@page "/wallet"
+@inject WalletApiService WalletApiService
+@inject AuthState AuthState
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JS
+@implements IDisposable
+@using QRCoder
+
+<h1><Icon Name="wallet" Size="22" /> Ví của tôi</h1>
+
+@if (!AuthState.IsAuthenticated)
+{
+    <p class="hint-text">Đang chuyển tới trang đăng nhập...</p>
+}
+else if (_loading)
+{
+    <p>Đang tải...</p>
+}
+else if (_wallet is null)
+{
+    <p class="page-empty">@(_message ?? "Không tải được thông tin Ví. Ví chỉ dành cho tài khoản Người chơi.")</p>
+}
+else
+{
+    @* Đợt 16: theo Stitch "Tài khoản & Ví tinh gọn" - đầu trang hồ sơ + thẻ ví 2 cột + 3 nút
+       thao tác + dải tiến độ lên hạng. *@
+    @* Đợt 16: desktop chia 2 cột (trái: hồ sơ + ví + hạng, phải: nạp tiền) để không trống
+       một nửa màn hình; mobile tự xếp 1 cột. *@
+    <div class="wallet-layout">
+    <div class="wallet-col-main">
+    <div class="acc-head">
+        <span class="acc-avatar">@AvatarInitial</span>
+        <div class="acc-head-text">
+            <div class="acc-name-row">
+                <span class="acc-name">@AuthState.FullName</span>
+                <span class="tag-tier">@_wallet.MembershipTier</span>
+            </div>
+            <span class="acc-sub"><Icon Name="verified" Size="14" Class="icon-accent" /> Hội viên BMS Billiard Club</span>
+        </div>
+    </div>
+
+    <section class="wallet-card">
+        <div class="wallet-card-top">
+            <span class="wallet-label"><Icon Name="lock" Size="16" /> Ví hội viên &amp; số dư</span>
+            <span class="wallet-chip">Hạng @_wallet.MembershipTier</span>
+        </div>
+        <div class="wallet-cols">
+            <div>
+                <span class="wallet-col-label">Khả dụng</span>
+                <div class="wallet-amount">@_wallet.WalletBalance.ToString("N0")<span class="wallet-cur">đ</span></div>
+            </div>
+            <div>
+                <span class="wallet-col-label">Tổng đã nạp</span>
+                <div class="wallet-amount wallet-amount-gold">@_wallet.TotalTopUpAmount.ToString("N0")<span class="wallet-cur">đ</span></div>
+                <span class="wallet-col-sub">Lũy kế từ khi mở ví</span>
+            </div>
+        </div>
+        <div class="wallet-actions">
+            <a class="wallet-action wallet-action-primary" href="wallet#nap-tien" @onclick:preventDefault="true" @onclick='() => ScrollTo("nap-tien")'>
+                <Icon Name="add_card" Size="22" /><span>Nạp tiền</span>
+            </a>
+            <a class="wallet-action" href="wallet#lich-su" @onclick:preventDefault="true" @onclick='() => ScrollTo("lich-su")'>
+                <Icon Name="receipt_long" Size="22" /><span>Lịch sử</span>
+            </a>
+            <a class="wallet-action" href="profile">
+                <Icon Name="person" Size="22" /><span>Hồ sơ</span>
+            </a>
+        </div>
+    </section>
+
+    <section class="tier-card">
+        @if (!string.IsNullOrEmpty(_wallet.NextTierName) && _wallet.NextTierThreshold > 0)
+        {
+            var remaining = Math.Max(0, _wallet.NextTierThreshold - _wallet.TotalTopUpAmount);
+            var pct = Math.Min(100, (double)(_wallet.TotalTopUpAmount / _wallet.NextTierThreshold) * 100);
+            <div class="tier-row">
+                <span class="tier-title"><span class="stat-dot stat-dot-live"></span>Lên hạng @_wallet.NextTierName</span>
+                <span class="tier-need">Còn @remaining.ToString("N0")đ</span>
+            </div>
+            <div class="tier-bar"><span style="width:@pct.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)%"></span></div>
+            <span class="wallet-col-sub">Mốc @_wallet.NextTierThreshold.ToString("N0")đ tổng nạp lũy kế</span>
+        }
+        else
+        {
+            <div class="tier-row">
+                <span class="tier-title"><span class="stat-dot stat-dot-live"></span>Hạng hội viên cao nhất</span>
+            </div>
+            <span class="wallet-col-sub">Bạn đang ở hạng hội viên cao nhất.</span>
+        }
+    </section>
+
+    @* Tích điểm: điểm tính từ các lần thanh toán đã hoàn tất (xem BMS.Shared.LoyaltyPoints). *@
+    <section class="card points-card" id="diem">
+        <div class="points-head">
+            <h2><Icon Name="stars" Size="18" /> Điểm tích lũy</h2>
+            <span class="points-balance">@(_points?.Balance.ToString("N0") ?? "0") <small>điểm</small></span>
+        </div>
+        <p class="hint-text">
+            Mỗi @LoyaltyPoints.SpendPerPoint.ToString("N0")đ thanh toán tại quán được 1 điểm.
+            Đổi @LoyaltyPoints.RedeemStep điểm = @((LoyaltyPoints.RedeemStep * LoyaltyPoints.PointValue).ToString("N0"))đ vào Ví.
+        </p>
+        <p class="wallet-col-sub">Đã tích @(_points?.Earned.ToString("N0") ?? "0") điểm · đã đổi @(_points?.Redeemed.ToString("N0") ?? "0") điểm</p>
+        <div class="form-actions points-redeem">
+            <input class="input" type="number" min="@LoyaltyPoints.RedeemStep" step="@LoyaltyPoints.RedeemStep" @bind="_redeemPoints" aria-label="Số điểm muốn đổi" />
+            <button class="btn btn-primary" @onclick="RedeemPoints" disabled="@(_redeemBusy || (_points?.Balance ?? 0) < LoyaltyPoints.RedeemStep)">
+                @(_redeemBusy ? "Đang đổi..." : "Đổi điểm vào Ví")
+            </button>
+        </div>
+        @if (!string.IsNullOrEmpty(_pointsMessage))
+        {
+            <p class="hint-text">@_pointsMessage</p>
+        }
+    </section>
+
+
+    </div>
+    <div class="wallet-col-side">
+    <div class="card form-card wallet-topup" id="nap-tien">
+        <h2><Icon Name="card" Size="18" /> Nạp tiền</h2>
+        <div class="form-field">
+            <label>Số tiền (đ)</label>
+            <input class="input" type="number" @bind="_topUpForm.Amount" />
+        </div>
+        <div class="form-field">
+            <label>Phương thức</label>
+            <select class="input" @bind="_topUpForm.Method">
+                <option value="Cash">Tiền mặt tại quầy</option>
+                <option value="BankTransfer">Chuyển khoản ngân hàng</option>
+            </select>
+        </div>
+        @if (_topUpForm.Method == "BankTransfer")
+        {
+            <div class="form-field">
+                <label>Ảnh chứng từ chuyển khoản</label>
+                <InputFile OnChange="HandleProofSelected" accept=".png,.jpg,.jpeg,.gif,.webp" />
+                @if (!string.IsNullOrEmpty(_topUpForm.ProofImageUrl))
+                {
+                    <img src="@_topUpForm.ProofImageUrl" alt="Chứng từ chuyển khoản" class="preview-image" />
+                }
+            </div>
+        }
+        <div class="form-field">
+            <label>Ghi chú (tùy chọn)</label>
+            <textarea class="input" rows="2" @bind="_topUpForm.Note"></textarea>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_message))
+        {
+            <p class="hint-text">@_message</p>
+        }
+
+        <div class="form-actions">
+            <button class="btn btn-primary" @onclick="SubmitTopUp" disabled="@_busy">
+                @(_busy ? "Đang gửi..." : "Gửi yêu cầu nạp tiền")
+            </button>
+        </div>
+        <p class="hint-text">Yêu cầu nạp tiền sẽ chờ nhân viên/quản trị viên xác nhận trước khi cộng vào Ví.</p>
+    </div>
+
+    @* Mã QR hội viên: đưa cho nhân viên quét khi thanh toán bằng Thẻ hội viên. Mã có chữ ký
+       của máy chủ và hết hạn sau 10 phút (tự làm mới) nên ảnh chụp màn hình cũ không dùng lại được. *@
+    <section class="card member-qr-card" id="ma-qr">
+        <h2><Icon Name="qr_code_2" Size="18" /> Mã QR hội viên</h2>
+        @if (_qrImage is not null)
+        {
+            <img class="member-qr" src="@_qrImage" width="220" height="220" alt="Mã QR hội viên của @AuthState.FullName" />
+            <p class="wallet-col-sub">Đưa mã này cho nhân viên quét khi thanh toán. Hiệu lực đến @_qrExpires?.ToLocalTime().ToString("HH:mm").</p>
+        }
+        else
+        {
+            <p class="hint-text">Không tạo được mã QR. Vui lòng thử lại.</p>
+        }
+        <button class="btn btn-ghost btn-sm" @onclick="RefreshQr">Làm mới mã</button>
+    </section>
+    </div>
+    </div>
+
+    <div class="section" id="lich-su">
+        <h2><Icon Name="clock" Size="18" /> Lịch sử giao dịch</h2>
+        @if (_transactions.Count == 0)
+        {
+            <div class="empty-state">
+                <p class="page-empty">Chưa có giao dịch nào.</p>
+                <a class="btn btn-primary btn-sm" href="wallet#nap-tien">Nạp tiền</a>
+            </div>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Loại</th>
+                        <th>Phương thức</th>
+                        <th>Số tiền</th>
+                        <th>Trạng thái</th>
+                        <th>Thời gian</th>
+                        <th>Ghi chú</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var t in _transactions)
+                    {
+                        <tr>
+                            <td>@(t.Type switch { "TopUp" => "Nạp tiền", LoyaltyPoints.RedeemTransactionType => "Đổi điểm", _ => "Thanh toán" })</td>
+                            <td>@MethodLabel(t.Method)</td>
+                            <td>@t.Amount.ToString("N0") đ</td>
+                            <td>@StatusLabel(t.Status)</td>
+                            <td>@t.CreatedAtUtc.ToLocalTime().ToString("HH:mm dd/MM/yyyy")</td>
+                            <td>@(t.Note ?? "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+}
+
+@code {
+    // Đợt 16: chữ cái đầu của tên (avatar) + cuộn mượt tới khối Nạp tiền / Lịch sử.
+    private string AvatarInitial =>
+        string.IsNullOrWhiteSpace(AuthState.FullName)
+            ? "?"
+            : AuthState.FullName!.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries)[^1][..1].ToUpperInvariant();
+
+    private async Task ScrollTo(string id) =>
+        await JS.InvokeVoidAsync("eval", $"document.getElementById('{id}')?.scrollIntoView({{ behavior: 'smooth' }})");
+
+    private WalletInfoDto? _wallet;
+    private List<TransactionDto> _transactions = new();
+    private TopUpFormModel _topUpForm = new();
+    private bool _loading = true;
+    private bool _busy;
+    private string? _message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsAuthenticated)
+        {
+            NavigationManager.NavigateTo("/login");
+            return;
+        }
+
+        await LoadAsync();
+        _loading = false;
+
+        await RefreshQr();
+        // Mã QR hết hạn sau 10 phút: tự làm mới mỗi 5 phút khi đang mở trang Ví.
+        _qrTimer = new System.Threading.Timer(async _ =>
+        {
+            await RefreshQr();
+            await InvokeAsync(StateHasChanged);
+        }, null, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
+    }
+
+    private async Task LoadAsync()
+    {
+        _wallet = await WalletApiService.GetWalletInfoAsync();
+        _transactions = await WalletApiService.GetMyTransactionsAsync();
+        _points = await WalletApiService.GetPointsAsync();
+    }
+
+    // ===== Tích điểm =====
+    private PointsInfoDto? _points;
+    private int _redeemPoints = LoyaltyPoints.RedeemStep;
+    private bool _redeemBusy;
+    private string? _pointsMessage;
+
+    private async Task RedeemPoints()
+    {
+        _redeemBusy = true;
+        var (success, points, error) = await WalletApiService.RedeemPointsAsync(_redeemPoints);
+        _redeemBusy = false;
+        if (success && points is not null)
+        {
+            _pointsMessage = $"Đã đổi {_redeemPoints:N0} điểm thành {(_redeemPoints * LoyaltyPoints.PointValue):N0}đ vào Ví.";
+            await LoadAsync();
+        }
+        else
+        {
+            _pointsMessage = string.IsNullOrWhiteSpace(error) ? "Đổi điểm thất bại." : error;
+        }
+    }
+
+    // ===== Mã QR hội viên =====
+    private string? _qrImage;
+    private DateTime? _qrExpires;
+    private System.Threading.Timer? _qrTimer;
+
+    private async Task RefreshQr()
+    {
+        var qr = await WalletApiService.GetMemberQrAsync();
+        if (qr is null)
+        {
+            _qrImage = null;
+            return;
+        }
+
+        using var generator = new QRCodeGenerator();
+        using var data = generator.CreateQrCode(qr.Code, QRCodeGenerator.ECCLevel.M);
+        var png = new PngByteQRCode(data).GetGraphic(8);
+        _qrImage = "data:image/png;base64," + Convert.ToBase64String(png);
+        _qrExpires = qr.ExpiresAtUtc;
+    }
+
+    public void Dispose() => _qrTimer?.Dispose();
+
+    private async Task HandleProofSelected(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+
+        _message = "Đang tải ảnh lên...";
+        try
+        {
+            const long maxSize = 5 * 1024 * 1024;
+            await using var stream = file.OpenReadStream(maxSize);
+            using var memoryStream = new MemoryStream();
+            await stream.CopyToAsync(memoryStream);
+
+            var (success, url, error) = await WalletApiService.UploadProofImageAsync(
+                memoryStream.ToArray(), file.Name, file.ContentType);
+
+            if (success)
+            {
+                _topUpForm.ProofImageUrl = url;
+                _message = "Đã tải ảnh chứng từ lên.";
+            }
+            else
+            {
+                _message = "Tải ảnh thất bại: " + error;
+            }
+        }
+        catch (Exception ex)
+        {
+            _message = "Tải ảnh thất bại: " + ex.Message;
+        }
+    }
+
+    private async Task SubmitTopUp()
+    {
+        if (_topUpForm.Amount <= 0)
+        {
+            _message = "Vui lòng nhập số tiền hợp lệ.";
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+
+        var (success, error) = await WalletApiService.RequestTopUpAsync(
+            _topUpForm.Amount, _topUpForm.Method, _topUpForm.Note, _topUpForm.ProofImageUrl);
+
+        _busy = false;
+
+        if (success)
+        {
+            _message = "Đã gửi yêu cầu nạp tiền, vui lòng chờ nhân viên xác nhận.";
+            _topUpForm = new TopUpFormModel();
+            await LoadAsync();
+        }
+        else
+        {
+            _message = error ?? "Gửi yêu cầu thất bại.";
+        }
+    }
+
+    private static string MethodLabel(string method) => method switch
+    {
+        "Wallet" => "Ví",
+        "Cash" => "Tiền mặt",
+        "BankTransfer" => "Chuyển khoản",
+        _ => method
+    };
+
+    private static string StatusLabel(string status) => status switch
+    {
+        "Pending" => "Chờ duyệt",
+        "Approved" => "Đã duyệt",
+        "Rejected" => "Từ chối",
+        _ => status
+    };
+
+    private class TopUpFormModel
+    {
+        public decimal Amount { get; set; }
+        public string Method { get; set; } = "Cash";
+        public string? Note { get; set; }
+        public string? ProofImageUrl { get; set; }
+    }
+}

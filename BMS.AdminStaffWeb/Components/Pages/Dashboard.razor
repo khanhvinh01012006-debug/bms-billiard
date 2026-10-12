@@ -1,0 +1,370 @@
+@page "/dashboard"
+@rendermode InteractiveServer
+@inject WalletApiService WalletApiService
+@inject InventoryApiService InventoryApiService
+@inject TableApiService TableApiService
+@inject ShiftApiService ShiftApiService
+@inject CueApiService CueApiService
+@inject AuthState AuthState
+@implements IDisposable
+
+@* Đợt 16: bố cục ĐÚNG Stitch Dark Luxury "Tổng quan quản trị" (t_ng_quan_qu_n_tr_s_n_giao_d_ch
+   _cuemaster_desktop): hàng 4 KPI, thanh "Trung tâm điều hành", lưới 8/4 cột (sơ đồ bàn trực
+   tiếp + cột phải). Mọi số liệu lấy từ API thật; các khối của Stitch thuộc chức năng BMS
+   chưa có (Escrow/tủ khóa) được thay bằng dữ liệu tương ứng đang có (duyệt giảm giá, cơ đang
+   cho thuê, tồn kho). Logic duyệt/từ chối giảm giá giữ nguyên như trước. *@
+
+@if (!AuthState.IsAdmin)
+{
+    <h1>Tổng quan CLB</h1>
+    <p class="page-empty">Bạn không có quyền truy cập trang này. Vui lòng đăng nhập bằng tài khoản Admin.</p>
+}
+else
+{
+    var occupied = _tables.Count(t => t.Status == TableStatus.Occupied);
+    var reserved = _tables.Count(t => t.Status == TableStatus.Reserved);
+    var free = _tables.Count(t => t.Status == TableStatus.Available);
+    var fillPct = _tables.Count == 0 ? 0 : occupied * 100.0 / _tables.Count;
+
+    <div class="dl-page">
+        <section class="kpi-row">
+            <div class="kpi-card">
+                <div class="kpi-glow kpi-glow-amber"></div>
+                <div class="kpi-card-top">
+                    <div>
+                        <span class="kpi-label">Doanh thu hôm nay</span>
+                        <div class="kpi-value text-amber">₫ @_todayRevenue.ToString("N0")</div>
+                    </div>
+                    <span class="kpi-icon-box text-amber"><Icon Name="payments" Size="24" /></span>
+                </div>
+                <div class="kpi-foot">
+                    <span class="kpi-foot-strong text-mint"><Icon Name="receipt_long" Size="16" /> @_todayPaymentCount</span>
+                    <span>hóa đơn đã thanh toán hôm nay</span>
+                </div>
+            </div>
+
+            <div class="kpi-card">
+                <div class="kpi-glow kpi-glow-mint"></div>
+                <div class="kpi-card-top">
+                    <div>
+                        <span class="kpi-label">Tỷ lệ lấp đầy bàn</span>
+                        <div class="kpi-value">@occupied.ToString("00")<span class="kpi-value-sub">/@_tables.Count bàn</span></div>
+                    </div>
+                    <span class="kpi-icon-box text-mint"><Icon Name="table_bar" Size="24" /></span>
+                </div>
+                <div class="kpi-foot kpi-foot-between">
+                    <span class="kpi-foot-strong text-mint">@fillPct.ToString("0.#")% công suất hiện tại</span>
+                    <span class="kpi-progress"><span class="kpi-progress-bar" style="width:@fillPct.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)%"></span></span>
+                </div>
+            </div>
+
+            <div class="kpi-card">
+                <div class="kpi-glow kpi-glow-amber"></div>
+                <div class="kpi-card-top">
+                    <div>
+                        <span class="kpi-label">Chờ duyệt nạp tiền</span>
+                        <div class="kpi-value text-amber">₫ @_pendingTopUps.Sum(t => t.Amount).ToString("N0")</div>
+                    </div>
+                    <span class="kpi-icon-box text-amber"><Icon Name="gavel" Size="24" /></span>
+                </div>
+                <div class="kpi-foot">
+                    <span class="kpi-pill"><span class="kpi-pill-dot"></span>@_pendingTopUps.Count yêu cầu đang chờ</span>
+                    <a class="kpi-link" href="topups">Xem &amp; duyệt</a>
+                </div>
+            </div>
+
+            <div class="kpi-card">
+                <div class="kpi-glow kpi-glow-mint"></div>
+                <div class="kpi-card-top">
+                    <div>
+                        <span class="kpi-label">Cơ đang cho thuê</span>
+                        <div class="kpi-value">@_rentals.Count.ToString("00") <span class="kpi-value-sub">cây cơ</span></div>
+                    </div>
+                    <span class="kpi-icon-box text-mint"><Icon Name="diamond" Size="24" /></span>
+                </div>
+                <div class="kpi-foot kpi-foot-between">
+                    <span>Tồn kho thấp: <strong>@_lowStockItems.Count</strong> mặt hàng</span>
+                    <span class="kpi-tag text-mint">@_cashDiscrepancies.Count CA LỆCH QUỸ</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="dl-actionbar">
+            <div class="dl-actionbar-title">
+                <span class="dl-actionbar-accent"></span>
+                <div>
+                    <h2 class="dl-title-md">Trung tâm điều hành BMS Billiard Club</h2>
+                    <span class="dl-body-sm">Theo dõi phiên chơi thời gian thực, duyệt giảm giá và kiểm soát quỹ ca làm việc</span>
+                </div>
+            </div>
+            <div class="dl-actionbar-buttons">
+                <a class="btn btn-primary" href="tables/manage"><Icon Name="add_circle" Size="18" />Thêm bàn mới</a>
+                <a class="btn btn-surface" href="topups"><Icon Name="verified_user" Size="18" Class="text-amber" />Duyệt nạp tiền</a>
+                <a class="btn btn-surface" href="inventory/manage"><Icon Name="inventory_2" Size="18" Class="text-mint" />Nhập kho</a>
+            </div>
+        </section>
+
+        <div class="dl-workspace">
+            <section class="dl-main">
+                <div class="dl-section-head">
+                    <div class="dl-section-title">
+                        <Icon Name="sports_bar" Size="26" Class="text-mint" />
+                        <div>
+                            <h3 class="dl-headline-sm">Sơ đồ bàn chơi trực tiếp</h3>
+                            <p class="dl-body-sm">Trạng thái cập nhật tức thời qua SignalR khi nhân viên nhận/trả bàn</p>
+                        </div>
+                    </div>
+                    <div class="dl-segment">
+                        <button class="@SegClass(null)" @onclick="() => _filter = null">Tất cả (@_tables.Count)</button>
+                        <button class="@SegClass(TableStatus.Occupied)" @onclick="() => _filter = TableStatus.Occupied">Đang chơi (@occupied)</button>
+                        <button class="@SegClass(TableStatus.Reserved)" @onclick="() => _filter = TableStatus.Reserved">Đã đặt (@reserved)</button>
+                        <button class="@SegClass(TableStatus.Available)" @onclick="() => _filter = TableStatus.Available">Bàn trống (@free)</button>
+                    </div>
+                </div>
+
+                @if (_loading)
+                {
+                    <p class="hint-text">Đang tải...</p>
+                }
+                else
+                {
+                    <div class="dl-table-grid">
+                        @foreach (var t in _tables.Where(t => _filter is null || t.Status == _filter))
+                        {
+                            <AdminTableCard Table="t" Now="_now" />
+                        }
+                    </div>
+                }
+
+                <div class="dl-panel">
+                    <div class="dl-panel-head">
+                        <div>
+                            <h3 class="dl-headline-sm">Công suất bàn hôm nay</h3>
+                            <p class="dl-body-sm">Số bàn hoạt động theo từng giờ trong ngày</p>
+                        </div>
+                        <span class="dl-legend"><span class="dl-legend-dot"></span>Bàn hoạt động</span>
+                    </div>
+                    <div class="heatmap-row">
+                        @foreach (var h in _heatmap)
+                        {
+                            <div class="heatmap-col" title="Giờ @h.Hour: @h.ActiveTableCount bàn">
+                                <div class="heatmap-bar" style="height:@HeatmapBarPercent(h.ActiveTableCount)%;"></div>
+                            </div>
+                        }
+                    </div>
+                    <div class="heatmap-axis">
+                        <span>0h</span><span>6h</span><span>12h</span><span>18h</span><span>23h</span>
+                    </div>
+                </div>
+
+                <div class="dl-panel">
+                    <div class="dl-panel-head">
+                        <div>
+                            <h3 class="dl-headline-sm">Lệch quỹ tiền mặt</h3>
+                            <p class="dl-body-sm">Các ca có quỹ cuối ca khác quỹ dự kiến</p>
+                        </div>
+                    </div>
+                    @if (_cashDiscrepancies.Count == 0)
+                    {
+                        <p class="page-empty">Không có ca nào bị lệch quỹ đáng kể.</p>
+                    }
+                    else
+                    {
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Nhân viên</th><th>Ca</th><th>Quỹ đầu ca</th><th>Quỹ cuối ca thực tế</th><th>Quỹ dự kiến</th><th>Lệch</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var d in _cashDiscrepancies)
+                                {
+                                    <tr>
+                                        <td>@d.StaffName</td>
+                                        <td>@d.StartedAtUtc.ToLocalTime().ToString("HH:mm dd/MM") - @(d.EndedAtUtc?.ToLocalTime().ToString("HH:mm dd/MM") ?? "—")</td>
+                                        <td>@d.OpeningCashAmount.ToString("N0") đ</td>
+                                        <td>@(d.ClosingCashAmount?.ToString("N0") ?? "—") đ</td>
+                                        <td>@d.ExpectedClosingCashAmount.ToString("N0") đ</td>
+                                        <td class="@(d.Discrepancy < 0 ? "text-danger" : "dashboard-over")">@d.Discrepancy.ToString("N0") đ</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </section>
+
+            <aside class="dl-aside">
+                <div class="dl-feed">
+                    <div class="dl-feed-head">
+                        <div>
+                            <span class="dl-eyebrow"><span class="dl-eyebrow-dot"></span>Live feed</span>
+                            <h3 class="dl-headline-sm">Chờ duyệt giảm giá</h3>
+                        </div>
+                        <span class="dl-feed-count">@_pendingDiscounts.Count chờ duyệt</span>
+                    </div>
+                    @if (!string.IsNullOrEmpty(_discountMessage))
+                    {
+                        <p class="hint-text">@_discountMessage</p>
+                    }
+                    @if (_pendingDiscounts.Count == 0)
+                    {
+                        <p class="page-empty">Không có yêu cầu nào đang chờ.</p>
+                    }
+                    @foreach (var d in _pendingDiscounts)
+                    {
+                        <div class="dl-feed-item">
+                            <div class="dl-feed-item-top">
+                                <span class="dl-feed-code">#GG-@d.Id</span>
+                                <span class="dl-feed-amount">-₫ @d.DiscountAmount.ToString("N0")</span>
+                            </div>
+                            <span class="dl-feed-kind">Giảm @d.DiscountPercent% · @d.TableName</span>
+                            <span class="dl-feed-title">Nhân viên: @d.StaffName</span>
+                            <span class="dl-feed-sub">@(d.Reason ?? "Không ghi lý do")</span>
+                            <div class="dl-feed-actions">
+                                <button class="btn btn-surface btn-sm" @onclick="() => RejectDiscount(d.Id)"><Icon Name="close" Size="16" />Từ chối</button>
+                                <button class="btn btn-primary btn-sm" @onclick="() => ApproveDiscount(d.Id)"><Icon Name="check_circle" Size="16" />Duyệt</button>
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <div class="dl-feed">
+                    <div class="dl-feed-head">
+                        <div>
+                            <span class="dl-eyebrow text-mint">Tủ cơ &amp; cho thuê</span>
+                            <h3 class="dl-headline-sm">Cơ đang cho thuê</h3>
+                        </div>
+                        <a class="dl-feed-link" href="cues/manage">Xem tất cả <Icon Name="arrow_forward" Size="16" /></a>
+                    </div>
+                    @if (_rentals.Count == 0)
+                    {
+                        <p class="page-empty">Hiện không có cơ nào đang được thuê.</p>
+                    }
+                    @foreach (var r in _rentals.Take(5))
+                    {
+                        var dur = _now - r.RentedAtUtc;
+                        <div class="dl-rent-item">
+                            <span class="dl-rent-thumb"><Icon Name="sports_martial_arts" Size="22" /></span>
+                            <div class="dl-rent-text">
+                                <span class="dl-feed-title">@r.CueName</span>
+                                <span class="dl-feed-sub">Khách: @r.CustomerName</span>
+                            </div>
+                            <div class="dl-rent-right">
+                                <span class="dl-rent-tag">Đang thuê</span>
+                                <span class="dl-rent-time">@(((int)dur.TotalHours).ToString("00")):@dur.ToString(@"mm")</span>
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <div class="dl-feed">
+                    <div class="dl-feed-head">
+                        <div>
+                            <span class="dl-eyebrow text-error">Cảnh báo</span>
+                            <h3 class="dl-headline-sm">Tồn kho thấp</h3>
+                        </div>
+                        <a class="dl-feed-link" href="inventory/manage">Nhập kho <Icon Name="arrow_forward" Size="16" /></a>
+                    </div>
+                    @if (_lowStockItems.Count == 0)
+                    {
+                        <p class="page-empty">Không có cảnh báo nào.</p>
+                    }
+                    @foreach (var item in _lowStockItems)
+                    {
+                        <div class="dl-row"><span>@item.Name</span><span class="text-danger">còn @item.Quantity @item.Unit</span></div>
+                    }
+                </div>
+            </aside>
+        </div>
+    </div>
+}
+
+@code {
+    private decimal _todayRevenue;
+    private int _todayPaymentCount;
+    private bool _loading = true;
+    private List<TableDto> _tables = new();
+    private List<TransactionDto> _pendingTopUps = new();
+    private List<CueRentalDto> _rentals = new();
+    private List<InventoryItemDto> _lowStockItems = new();
+    private List<DiscountRequestDto> _pendingDiscounts = new();
+    private string? _discountMessage;
+    private List<HourlyOccupancyDto> _heatmap = new();
+    private List<ShiftCashDiscrepancyDto> _cashDiscrepancies = new();
+    private TableStatus? _filter;
+    private DateTime _now = DateTime.UtcNow;
+    private System.Threading.Timer? _clock;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsAdmin)
+        {
+            return;
+        }
+
+        await LoadAsync();
+
+        // Đồng hồ "Thời gian bật bàn" chạy theo giây như Stitch (live-stopwatch).
+        _clock = new System.Threading.Timer(_ =>
+        {
+            _now = DateTime.UtcNow;
+            _ = InvokeAsync(StateHasChanged);
+        }, null, 1000, 1000);
+    }
+
+    private async Task LoadAsync()
+    {
+        var transactions = await WalletApiService.GetAllTransactionsAsync("Approved", null, "Payment");
+        var today = transactions.Where(t => t.CreatedAtUtc.ToLocalTime().Date == DateTime.Now.Date).ToList();
+        _todayRevenue = today.Sum(t => t.Amount);
+        _todayPaymentCount = today.Count;
+
+        _tables = await TableApiService.GetTablesAsync();
+        _pendingTopUps = await WalletApiService.GetPendingTransactionsAsync();
+        _rentals = await CueApiService.GetActiveRentalsAsync();
+
+        var items = await InventoryApiService.GetItemsAsync();
+        _lowStockItems = items.Where(i => i.IsLowStock).ToList();
+
+        _pendingDiscounts = await WalletApiService.GetPendingDiscountRequestsAsync();
+        _heatmap = await TableApiService.GetOccupancyHeatmapAsync();
+        _cashDiscrepancies = await ShiftApiService.GetCashDiscrepanciesAsync();
+        _loading = false;
+    }
+
+    private string SegClass(TableStatus? status) => _filter == status ? "dl-seg dl-seg-active" : "dl-seg";
+
+    // Chiều cao cột biểu đồ tính theo % so với giờ đông nhất trong ngày (tối thiểu 3% để
+    // giờ không có bàn vẫn thấy vạch) - trước đây dùng count * 20px nên từ 7 bàn trở lên cột
+    // cao hơn khung 120px và tràn đè lên tiêu đề.
+    private int HeatmapBarPercent(int activeTableCount)
+    {
+        var max = _heatmap.Count == 0 ? 0 : _heatmap.Max(x => x.ActiveTableCount);
+        if (max <= 0)
+        {
+            return 3;
+        }
+
+        return Math.Max(3, (int)Math.Round(activeTableCount * 100.0 / max));
+    }
+
+    private async Task ApproveDiscount(int id)
+    {
+        var (success, error) = await WalletApiService.ApproveDiscountRequestAsync(id);
+        _discountMessage = success ? "Đã duyệt yêu cầu giảm giá." : error;
+        _pendingDiscounts = await WalletApiService.GetPendingDiscountRequestsAsync();
+    }
+
+    private async Task RejectDiscount(int id)
+    {
+        var (success, error) = await WalletApiService.RejectDiscountRequestAsync(id);
+        _discountMessage = success ? "Đã từ chối yêu cầu giảm giá." : error;
+        _pendingDiscounts = await WalletApiService.GetPendingDiscountRequestsAsync();
+    }
+
+    public void Dispose()
+    {
+        _clock?.Dispose();
+    }
+}

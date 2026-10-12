@@ -1,0 +1,151 @@
+@page "/staff/payments"
+@rendermode InteractiveServer
+@inject WalletApiService WalletApiService
+@inject AuthState AuthState
+@inject IConfiguration Configuration
+@implements IAsyncDisposable
+@using Microsoft.AspNetCore.SignalR.Client
+
+<h1><Icon Name="card" Size="22" /> Duyệt nạp tiền</h1>
+
+@if (!AuthState.IsStaffOrAdmin)
+{
+    <p class="hint-text">Trang này chỉ dành cho Nhân viên và Admin. Vui lòng đăng nhập.</p>
+}
+else
+{
+    @if (_pending.Count == 0)
+    {
+        <p class="page-empty">Không có yêu cầu nạp tiền nào đang chờ duyệt.</p>
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Khách hàng</th>
+                    <th>Phương thức</th>
+                    <th>Số tiền</th>
+                    <th>Ghi chú</th>
+                    <th>Chứng từ</th>
+                    <th>Thời gian</th>
+                    <th>Ghi chú xử lý</th>
+                    <th>Xử lý</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var t in _pending)
+                {
+                    <tr>
+                        <td>@t.AccountName</td>
+                        <td>@(t.Method == "Cash" ? "Tiền mặt" : "Chuyển khoản")</td>
+                        <td>@t.Amount.ToString("N0") đ</td>
+                        <td>@(t.Note ?? "—")</td>
+                        <td>
+                            @if (!string.IsNullOrEmpty(t.ProofImageUrl))
+                            {
+                                <a href="@t.ProofImageUrl" target="_blank">Xem ảnh</a>
+                            }
+                            else
+                            {
+                                <span>—</span>
+                            }
+                        </td>
+                        <td>@t.CreatedAtUtc.ToLocalTime().ToString("HH:mm dd/MM/yyyy")</td>
+                        <td>
+                            <input class="input" placeholder="Ghi chú xử lý (tùy chọn)" @bind="_notes[t.Id]" />
+                        </td>
+                        <td class="row-actions">
+                            <button class="btn btn-primary btn-sm" @onclick="() => Approve(t.Id)">Duyệt</button>
+                            <button class="btn btn-danger btn-sm" @onclick="() => Reject(t.Id)">Từ chối</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    @if (!string.IsNullOrEmpty(_message))
+    {
+        <p class="toast-msg" @key="_message" role="status">@_message</p>
+    }
+}
+
+@code {
+    private string ApiBaseUrl => (Configuration["Api:BaseUrl"] ?? "https://localhost:5001").TrimEnd('/');
+
+    private List<TransactionDto> _pending = new();
+    private Dictionary<int, string> _notes = new();
+    private string? _message;
+    private HubConnection? _hubConnection;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsStaffOrAdmin)
+        {
+            return;
+        }
+
+        await LoadAsync();
+
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl($"{ApiBaseUrl}/hubs/bms")
+            .WithAutomaticReconnect(new ForeverRetryPolicy())
+            .Build();
+
+        // Mất kết nối rồi tự nối lại: tải lại dữ liệu vì các sự kiện phát ra lúc mất mạng đã bị lỡ.
+        _hubConnection.Reconnected += async _ =>
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        };
+
+        _hubConnection.On<object>("TransactionCreated", async _ =>
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            await _hubConnection.StartAsync();
+        }
+        catch
+        {
+            // Falls back to manual refresh if the hub isn't reachable yet.
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _pending = await WalletApiService.GetPendingTransactionsAsync();
+        foreach (var t in _pending)
+        {
+            if (!_notes.ContainsKey(t.Id))
+            {
+                _notes[t.Id] = "";
+            }
+        }
+    }
+
+    private async Task Process(int id, bool approve)
+    {
+        var note = _notes.TryGetValue(id, out var n) ? n : null;
+        var (success, error) = await WalletApiService.ProcessTransactionAsync(id, approve, note);
+        _message = success
+            ? (approve ? "Đã duyệt yêu cầu nạp tiền." : "Đã từ chối yêu cầu nạp tiền.")
+            : error;
+        await LoadAsync();
+    }
+
+    private Task Approve(int id) => Process(id, true);
+    private Task Reject(int id) => Process(id, false);
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
+}

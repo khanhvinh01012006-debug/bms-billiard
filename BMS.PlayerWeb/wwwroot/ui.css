@@ -1,0 +1,620 @@
+/* ui.css - quy tắc giao diện DÙNG CHUNG cho cả trang Người chơi và cổng Nhân viên/Quản trị
+   (file giống hệt nhau ở BMS.PlayerWeb/wwwroot và BMS.AdminStaffWeb/wwwroot, nạp SAU app.css/ops.css).
+   Chỉ dùng biến trong tokens.css. */
+
+/* =====================================================================================
+   1. Menu tài khoản ở góc trên phải (avatar + tên + vai trò -> Hồ sơ / Đăng xuất)
+   ===================================================================================== */
+.account-menu {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.account-menu-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: .625rem;
+    min-height: var(--tap-min);
+    margin: 0;
+    padding: .25rem .5rem .25rem .25rem;
+    border: 1px solid transparent;
+    border-radius: var(--r-full);
+    background: transparent;
+    color: var(--c-text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color .15s ease, border-color .15s ease;
+}
+
+.account-menu-trigger:hover,
+.account-menu-trigger[aria-expanded="true"] {
+    background: var(--c-surface-2);
+    border-color: var(--c-border);
+}
+
+.account-menu-trigger:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.account-menu-caret {
+    color: var(--c-text-muted);
+    transition: transform .15s ease;
+}
+
+.account-menu-trigger[aria-expanded="true"] .account-menu-caret {
+    transform: rotate(180deg);
+}
+
+/* lớp trong suốt phủ màn hình: bấm ra ngoài là đóng menu */
+.account-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    background: transparent;
+}
+
+.account-menu-panel {
+    position: absolute;
+    top: calc(100% + .5rem);
+    right: 0;
+    z-index: 2;
+    width: 240px;
+    max-width: calc(100vw - 2rem);
+    padding: .375rem;
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-lg);
+    background: var(--c-surface);
+    box-shadow: var(--shadow-3);
+    animation: account-menu-in .12s ease-out;
+}
+
+@keyframes account-menu-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .account-menu-panel { animation: none; }
+}
+
+.account-menu-head {
+    display: flex;
+    flex-direction: column;
+    gap: .125rem;
+    padding: .5rem .75rem .625rem;
+    margin-bottom: .25rem;
+    border-bottom: 1px solid var(--c-border);
+}
+
+.account-menu-name {
+    overflow: hidden;
+    color: var(--c-text);
+    font-size: .875rem;
+    font-weight: 600;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.account-menu-role {
+    color: var(--c-text-muted);
+    font-size: .75rem;
+}
+
+.account-menu-item {
+    display: flex;
+    align-items: center;
+    gap: .625rem;
+    width: 100%;
+    min-height: var(--tap-min);
+    margin: 0;
+    padding: .5rem .75rem;
+    border: none;
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--c-text);
+    font: inherit;
+    font-size: .875rem;
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.account-menu-item:hover,
+.account-menu-item:focus-visible {
+    outline: none;
+    background: var(--c-surface-2);
+}
+
+.account-menu-logout {
+    color: var(--c-danger);
+}
+
+.account-menu-logout:hover,
+.account-menu-logout:focus-visible {
+    background: var(--c-danger-soft);
+}
+
+/* =====================================================================================
+   2. Gọi món & dịch vụ (cổng Nhân viên): mỗi món MỘT hàng, cao đều nhau
+      ảnh vuông 64px | tên + giá + tồn kho | ô số lượng 72px + nút Thêm
+   ===================================================================================== */
+.order-list .order-item,
+.order-list .order-item:has(.order-item-thumb) {
+    display: grid;
+    grid-template-columns: 64px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: .75rem;
+    min-height: 80px;
+    padding: .5rem;
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    background: var(--c-surface);
+}
+
+.order-item-media {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 64px;
+    height: 64px;
+    overflow: hidden;
+    border-radius: var(--r-sm);
+    background: var(--c-surface-2);
+}
+
+.order-item-noimg {
+    color: var(--c-text-muted);
+}
+
+.order-list .order-item-thumb {
+    display: block;
+    width: 64px;
+    height: 64px;
+    object-fit: cover;
+    border-radius: 0;
+}
+
+.order-list .order-item-text {
+    display: flex;
+    flex-direction: column;
+    gap: .125rem;
+    min-width: 0;
+}
+
+.order-list .order-item-name {
+    overflow: hidden;
+    color: var(--c-text);
+    font-size: .875rem;
+    font-weight: 600;
+    line-height: 1.3;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.order-list .order-item-price {
+    color: var(--c-primary-text);
+    font-size: .8125rem;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.order-item-stock {
+    color: var(--c-text-muted);
+    font-size: .75rem;
+    line-height: 1.3;
+}
+
+.order-item-actions {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+}
+
+.order-list .order-qty {
+    width: 72px;
+    min-height: 40px;
+    margin: 0;
+    padding: .35rem .4rem;
+    text-align: center;
+}
+
+.order-list .order-add {
+    min-height: 40px;
+    margin: 0;
+    white-space: nowrap;
+}
+
+.modal-card:has(.order-list) {
+    max-width: 600px;
+}
+
+.order-list {
+    max-height: min(420px, 50vh);
+}
+
+/* Điện thoại hẹp: ô số lượng + nút vẫn cùng hàng, ảnh và chữ co lại vừa màn hình */
+@media (max-width: 420px) {
+    .order-list .order-item,
+    .order-list .order-item:has(.order-item-thumb) {
+        gap: .5rem;
+        padding: .4rem;
+    }
+
+    .order-list .order-qty {
+        width: 56px;
+    }
+
+    .order-list .order-add {
+        padding-inline: .625rem;
+    }
+}
+
+/* =====================================================================================
+   3. Bố cục trang thống nhất (cả 3 cổng)
+   ===================================================================================== */
+
+/* 3.1 Khung nội dung: căn giữa, rộng tối đa 1200px, lề đều */
+.app-content {
+    width: 100%;
+    max-width: 1200px;
+    margin-inline: auto;
+}
+
+@media (min-width: 1024px) {
+    .app-content {
+        padding-left: 2rem;
+        padding-right: 2rem;
+    }
+}
+
+@media (max-width: 767.98px) {
+    .app-content {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+}
+
+/* 3.2 Tiêu đề trang: cùng cỡ chữ, khoảng cách, màu biểu tượng */
+.app-content > h1,
+.page-narrow > h1 {
+    margin: 0 0 1.5rem;
+    color: var(--c-text);
+    font-size: 1.75rem;
+    line-height: 2.25rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
+.app-content > h1 > .icon,
+.page-narrow > h1 > .icon {
+    color: var(--c-primary);
+}
+
+/* 3.3 Khung phụ trợ */
+.page-narrow {
+    max-width: 720px;
+    margin-inline: auto;
+}
+
+.page-narrow .card,
+.page-narrow .form-card {
+    max-width: none;
+}
+
+.page-grid-2 {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.5rem;
+    align-items: start;
+}
+
+@media (min-width: 1024px) {
+    .page-grid-2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+.page-grid-2 > .card,
+.page-grid-2 > .form-card {
+    max-width: none;
+    margin: 0;
+}
+
+.page-actions {
+    justify-content: flex-end;
+    margin-top: 1.5rem;
+}
+
+/* 3.4 Hồ sơ cá nhân: thẻ tóm tắt | form (2 cột trên máy tính) */
+.profile-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.5rem;
+    align-items: start;
+}
+
+@media (min-width: 900px) {
+    .profile-layout {
+        grid-template-columns: 300px minmax(0, 1fr);
+    }
+}
+
+.profile-summary {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: .375rem;
+    padding: 1.75rem 1.5rem 1.5rem;
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-lg);
+    background: var(--c-surface);
+    box-shadow: var(--shadow-1);
+    text-align: center;
+}
+
+.profile-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 72px;
+    height: 72px;
+    margin-bottom: .375rem;
+    border-radius: 50%;
+    background: var(--c-primary-soft);
+    color: var(--c-primary-text);
+    font-size: 1.75rem;
+    font-weight: 700;
+}
+
+.profile-summary-name {
+    color: var(--c-text);
+    font-size: 1.125rem;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.profile-summary-sub {
+    color: var(--c-text-muted);
+    font-size: .875rem;
+    overflow-wrap: anywhere;
+}
+
+.profile-summary .elo-badge {
+    width: 100%;
+    margin: 1rem 0 0;
+    align-items: center;
+}
+
+.elo-badge-value.elo-badge-value-sm {
+    font-size: 1rem;
+}
+
+.profile-layout .profile-card {
+    max-width: none;
+    margin: 0;
+    padding: 1.5rem 1.75rem;
+}
+
+@media (min-width: 1200px) {
+    .profile-layout .profile-card form {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        column-gap: 1.25rem;
+    }
+
+    .profile-layout .profile-card form > :not(.form-field) {
+        grid-column: 1 / -1;
+    }
+
+    .profile-layout .profile-card form > .btn {
+        justify-self: start;
+        width: auto;
+        min-width: 220px;
+    }
+}
+
+/* Ô nhập + nút/nhãn đi kèm trên cùng một hàng (vd. Số điện thoại + Xác thực SĐT) */
+.input-with-action {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+}
+
+.input-with-action > .input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.input-with-action > .btn,
+.input-with-action > .badge {
+    flex-shrink: 0;
+    margin: 0;
+}
+
+.input[readonly] {
+    background: var(--c-surface-2);
+    cursor: default;
+}
+
+/* 3.5 Trang quản lý có bảng nhiều cột (Nhân viên, Giải đấu): form ở trên (nhiều cột),
+   bảng rộng hết khung bên dưới - không bóp bảng thành cột hẹp chữ xuống từng dòng. */
+.app-content:has(> .manage-stack) {
+    display: block !important;
+}
+
+.manage-stack,
+.manage-stack .card.form-card {
+    position: static !important;
+    max-width: none !important;
+    margin-bottom: 1.5rem;
+}
+
+.manage-stack form,
+.card.form-card.manage-stack {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    column-gap: 1.25rem;
+    align-items: end;
+}
+
+.manage-stack form > :not(.form-field),
+.card.form-card.manage-stack > :not(.form-field) {
+    grid-column: 1 / -1;
+}
+
+.manage-stack .form-field textarea {
+    min-height: 44px;
+}
+
+/* 3.6 Thanh lọc báo cáo: ô chọn gọn trên 1 hàng */
+.filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .75rem;
+    margin-bottom: 1rem;
+}
+
+.filter-bar > .input {
+    flex: 0 1 260px;
+    width: auto;
+    min-width: 180px;
+    margin: 0;
+}
+
+@media (max-width: 600px) {
+    .filter-bar > .input {
+        flex: 1 1 100%;
+    }
+}
+
+/* 3.7 Bảng: tiêu đề cột không xuống dòng từng chữ. (Màn hẹp: app.css đã cho bảng cuộn ngang
+   TRONG khung bảng, không làm cả trang tràn.) */
+.data-table th {
+    white-space: nowrap;
+}
+
+@media (max-width: 1279.98px) {
+    .data-table {
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior-x: contain;
+    }
+}
+
+/* 3.8 Trạng thái rỗng: biểu tượng + 1 dòng chữ (+ nút hành động nếu có) */
+.page-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: .5rem;
+    margin: 0 0 1rem;
+    padding: 1.75rem 1rem;
+    border: 1px dashed var(--c-border-strong);
+    border-radius: var(--r-lg);
+    background: var(--c-surface);
+    color: var(--c-text-muted);
+    font-size: .9375rem;
+    text-align: center;
+}
+
+.page-empty::before {
+    content: "inbox";
+    color: var(--c-text-muted);
+    font-family: 'Material Symbols Outlined';
+    font-size: 2rem;
+    font-weight: 300;
+    line-height: 1;
+    font-feature-settings: 'liga';
+    -webkit-font-feature-settings: 'liga';
+    opacity: .7;
+}
+
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: .75rem;
+    margin: 0 0 1rem;
+    padding: 1.75rem 1rem;
+    border: 1px dashed var(--c-border-strong);
+    border-radius: var(--r-lg);
+    background: var(--c-surface);
+}
+
+.empty-state > .page-empty {
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+}
+
+/* trong modal / thẻ nhỏ: gọn hơn */
+.modal-card .page-empty,
+.card .page-empty {
+    padding: 1.25rem .75rem;
+}
+
+/* 3.9 Ví (trang khách): cột phải = Nạp tiền + Mã QR hội viên */
+.wallet-col-side {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.wallet-col-side .member-qr-card {
+    margin: 0;
+    text-align: center;
+}
+
+.wallet-col-side .member-qr-card .member-qr {
+    margin-inline: auto;
+}
+
+/* 3.10 Điện thoại: một cột, nút và ô nhập đủ lớn để chạm (>= 44px) */
+@media (max-width: 767.98px) {
+    .btn {
+        min-height: 44px;
+    }
+
+    .btn.btn-sm {
+        min-height: 40px;
+    }
+
+    .input,
+    select.input {
+        min-height: 44px;
+    }
+
+    .page-actions {
+        justify-content: stretch;
+    }
+
+    .page-actions > .btn {
+        flex: 1 1 auto;
+    }
+}
+
+/* 3.11 Lưới thẻ bàn: số cột theo bề rộng thật (768px -> 2 cột, 1440px -> 3-4 cột) để tên bàn,
+   "Bàn Lỗ · 2 người" và nút "Thanh toán" không bị vỡ dòng. Điện thoại giữ quy tắc cũ. */
+@media (min-width: 600px) {
+    .app-body .table-grid.table-grid-cards {
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    }
+
+    .app-main .table-grid.table-grid-cards {
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    }
+}
+
+@media (max-width: 767.98px) {
+    .profile-layout .profile-card {
+        padding: 1.25rem 1rem;
+    }
+
+    .profile-summary {
+        padding: 1.25rem 1rem;
+    }
+}

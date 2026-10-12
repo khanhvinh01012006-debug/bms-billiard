@@ -1,0 +1,188 @@
+@page "/ops/cues"
+@rendermode InteractiveServer
+@inject CueApiService CueApiService
+@inject AuthState AuthState
+@inject IConfiguration Configuration
+@implements IAsyncDisposable
+@using Microsoft.AspNetCore.SignalR.Client
+
+@* Phần "chế độ nhân viên" của trang Thuê & Mua Cơ (trước đây nằm trong PlayerWeb): xem cơ
+   cho thuê tại quầy và ghi nhận trả cơ / hư hỏng / mất cơ. Chữ và thao tác giữ nguyên. *@
+
+<h1><Icon Name="cue" Size="22" /> Thuê &amp; Mua Cơ</h1>
+
+@if (!AuthState.IsStaffOrAdmin)
+{
+    <p class="page-empty">Vui lòng đăng nhập bằng tài khoản Nhân viên hoặc Admin.</p>
+    return;
+}
+
+<p class="hint-text">Chế độ nhân viên: ghi nhận thuê/trả cơ cho khách tại quầy.</p>
+
+<div class="page-search">
+    <Icon Name="search" Size="20" Class="page-search-icon" />
+    <input class="page-search-input" placeholder="Tìm cơ theo tên, hãng, loại..." @bind="_search" @bind:event="oninput" />
+</div>
+
+@if (_loading)
+{
+    <p>Đang tải...</p>
+}
+else
+{
+    <div class="cue-grid">
+        @foreach (var cue in _cues.Where(c => !c.IsForSale && MatchesSearch(c.Name, c.Brand, c.Category)))
+        {
+            <div class="cue-card">
+                <div class="cue-media">
+                    <ProductImage Url="@cue.ImageUrl" FallbackBase="@ProductImages.ForCue(cue.Name, cue.Brand, cue.Category)" Alt="@cue.Name" />
+                    <span class="cue-media-tag">
+                        <span class="cue-media-tag-dot @(cue.AvailableCount > 0 ? "" : "is-off")"></span>
+                        @(cue.AvailableCount > 0 ? $"Còn {cue.AvailableCount} cây • Sẵn sàng" : "Đã cho thuê hết")
+                    </span>
+                    @if (!string.IsNullOrWhiteSpace(cue.Category))
+                    {
+                        <span class="cue-media-spec">@cue.Category</span>
+                    }
+                </div>
+                <div class="cue-body">
+                    <div class="cue-eyebrow-row">
+                        <span class="cue-eyebrow">@(string.IsNullOrWhiteSpace(cue.Brand) ? "Cơ cho thuê" : cue.Brand)</span>
+                        <span class="cue-eyebrow-right">Thuê theo giờ</span>
+                    </div>
+                    <h3 class="cue-title">@cue.Name</h3>
+                    <div class="cue-price-row">
+                        <div class="cue-price">
+                            <span class="cue-price-value">@cue.PricePerHour.ToString("N0")đ</span>
+                            <span class="cue-price-unit">/giờ</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+<div class="section">
+    <h2><Icon Name="cue" Size="18" /> Đang thuê</h2>
+    @if (_rentals.Count == 0)
+    {
+        <p class="page-empty">Không có cơ nào đang được thuê.</p>
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Cơ</th>
+                    <th>Khách</th>
+                    <th>Giờ thuê</th>
+                    <th>Xử lý</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var rental in _rentals)
+                {
+                    <tr>
+                        <td>@rental.CueName</td>
+                        <td>@rental.CustomerName</td>
+                        <td>@rental.RentedAtUtc.ToLocalTime().ToString("HH:mm dd/MM")</td>
+                        <td class="row-actions">
+                            <button class="btn btn-primary btn-sm" @onclick="() => ReturnOk(rental.Id)">Trả cơ</button>
+                            <button class="btn btn-warning btn-sm" @onclick="() => ReturnDamaged(rental.Id)">Hư hỏng</button>
+                            <button class="btn btn-danger btn-sm" @onclick="() => ReturnLost(rental.Id)">Mất cơ</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@if (!string.IsNullOrEmpty(_message))
+{
+    <p class="toast-msg" @key="_message" role="status">@_message</p>
+}
+
+@code {
+    private List<CueDto> _cues = new();
+    private List<CueRentalDto> _rentals = new();
+    private string _search = string.Empty;
+    private string? _message;
+    private bool _loading = true;
+    private HubConnection? _hubConnection;
+
+    private string ApiBaseUrl => (Configuration["Api:BaseUrl"] ?? "https://localhost:5001").TrimEnd('/');
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsStaffOrAdmin)
+        {
+            return;
+        }
+
+        await LoadAsync();
+
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl($"{ApiBaseUrl}/hubs/bms")
+            .WithAutomaticReconnect(new ForeverRetryPolicy())
+            .Build();
+
+        // Mất kết nối rồi tự nối lại: tải lại dữ liệu vì các sự kiện phát ra lúc mất mạng đã bị lỡ.
+        _hubConnection.Reconnected += async _ =>
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        };
+
+        _hubConnection.On<CueRentalDto>("CueRentalChanged", async _ =>
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            await _hubConnection.StartAsync();
+        }
+        catch
+        {
+            // Falls back to manual refresh if the hub isn't reachable yet.
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _cues = await CueApiService.GetCuesAsync();
+        _rentals = await CueApiService.GetActiveRentalsAsync();
+        _loading = false;
+    }
+
+    private bool MatchesSearch(params string?[] fields)
+    {
+        var q = _search.Trim();
+        return q.Length == 0 || fields.Any(f => !string.IsNullOrEmpty(f) && f.Contains(q, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task Return(int rentalId, string outcome, decimal? penalty, string? note)
+    {
+        var (success, error) = await CueApiService.ReturnAsync(rentalId, outcome, penalty, note);
+        _message = success ? "Đã cập nhật cơ." : error;
+        await LoadAsync();
+    }
+
+    private Task ReturnOk(int rentalId) => Return(rentalId, "Ok", null, null);
+
+    private Task ReturnDamaged(int rentalId) => Return(rentalId, "Damaged", 50000m, "Cơ bị hư hỏng khi trả.");
+
+    private Task ReturnLost(int rentalId) => Return(rentalId, "Lost", 300000m, "Khách làm mất cơ, đã lập biên bản đền tiền.");
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
+}

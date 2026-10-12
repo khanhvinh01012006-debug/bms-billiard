@@ -1,0 +1,292 @@
+@page "/tournaments"
+@inject TournamentApiService TournamentApiService
+@inject AuthState AuthState
+@inject ApiOptions ApiOptions
+@inject NavigationManager NavigationManager
+@implements IAsyncDisposable
+@using Microsoft.AspNetCore.SignalR.Client
+
+<h1><Icon Name="trophy" Size="22" /> Giải đấu</h1>
+
+@if (_loading)
+{
+    <p>Đang tải...</p>
+}
+else if (_tournaments.Count == 0)
+{
+    <p class="page-empty">Hiện chưa có giải đấu nào.</p>
+}
+else
+{
+    @* Đợt 16: card giải đấu cùng mẫu card Stitch tinh gọn (khung ảnh inset + nhãn trạng thái
+       nổi, dòng phụ in hoa, tiêu đề 20px, lệ phí lớn + nút hành động bên phải). *@
+    <div class="cue-grid">
+        @foreach (var t in _tournaments)
+        {
+            <div class="cue-card tour-card">
+                <div class="cue-media">
+                    @if (!string.IsNullOrEmpty(t.ImageUrl))
+                    {
+                        <img src="@t.ImageUrl" alt="@t.Name" />
+                    }
+                    else
+                    {
+                        <Icon Name="emoji_events" Size="44" />
+                    }
+                    <span class="cue-media-tag">
+                        <span class="cue-media-tag-dot @(t.Status == "Open" ? "" : t.Status == "Draft" ? "is-off" : "is-gold")"></span>
+                        @StatusLabel(t.Status)
+                    </span>
+                    <span class="cue-media-spec">
+                        @t.RegisteredCount@(t.MaxParticipants is not null ? $"/{t.MaxParticipants}" : "") cơ thủ@(t.IsFull ? " · Đã đủ" : "")
+                    </span>
+                </div>
+                <div class="cue-body">
+                    <div class="cue-eyebrow-row">
+                        <span class="cue-eyebrow">Giải đấu</span>
+                        <span class="cue-eyebrow-right">@t.StartDateUtc.ToLocalTime().ToString("dd/MM") - @t.EndDateUtc.ToLocalTime().ToString("dd/MM/yyyy")</span>
+                    </div>
+                    <h3 class="cue-title">@t.Name</h3>
+                    @if (!string.IsNullOrWhiteSpace(t.Description))
+                    {
+                        <p class="tcard-sub">@t.Description</p>
+                    }
+                    <div class="cue-price-row">
+                        <div class="cue-price">
+                            <span class="cue-price-value">@t.EntryFee.ToString("N0")đ</span>
+                            <span class="cue-price-unit">lệ phí</span>
+                        </div>
+                        @if (AuthState.IsPlayer && t.Status == "Open")
+                        {
+                            if (_myRegistrations.Contains(t.Id))
+                            {
+                                <button class="cue-btn cue-btn-buy" @onclick="() => Unregister(t.Id)">Hủy đăng ký</button>
+                            }
+                            else if (!t.IsFull)
+                            {
+                                <button class="cue-btn cue-btn-rent" @onclick="() => OpenRegisterModal(t)"><span>Đăng ký</span><Icon Name="arrow" Size="16" /></button>
+                            }
+                        }
+                        else if (!AuthState.IsAuthenticated && t.Status == "Open")
+                        {
+                            <button class="cue-btn cue-btn-rent" @onclick="PromptLogin">Đăng nhập để đăng ký</button>
+                        }
+                    </div>
+                </div>
+
+                @if (t.Status == "InProgress" || t.Status == "Completed")
+                {
+                    <button class="btn btn-ghost btn-sm" @onclick="() => ToggleBracket(t)">
+                        @(_bracketTournamentId == t.Id ? "Ẩn bảng đấu" : "Xem bảng đấu")
+                    </button>
+
+                    @if (_bracketTournamentId == t.Id)
+                    {
+                        @if (_bracketMatches.Count == 0)
+                        {
+                            <p class="page-empty">Chưa có bảng đấu.</p>
+                        }
+                        else
+                        {
+                            <div class="bracket-wrap">
+                                @foreach (var round in _bracketMatches.GroupBy(m => m.Round).OrderBy(g => g.Key))
+                                {
+                                    <div class="bracket-round">
+                                        <div class="bracket-round-title">Vòng @round.Key</div>
+                                        @foreach (var match in round.OrderBy(m => m.SlotInRound))
+                                        {
+                                            <div class="bracket-match">
+                                                <div class="bracket-player">
+                                                    <span class="@(match.Status == "Completed" && match.WinnerRegistrationId == match.Player1RegistrationId ? "bracket-winner" : "")">
+                                                        @(match.Player1Name ?? "Chưa xác định")
+                                                    </span>
+                                                </div>
+                                                <div class="bracket-player">
+                                                    <span class="@(match.Status == "Completed" && match.WinnerRegistrationId == match.Player2RegistrationId ? "bracket-winner" : "")">
+                                                        @(match.Player2Name ?? "Chưa xác định")
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    }
+                }
+            </div>
+        }
+    </div>
+}
+
+@if (!string.IsNullOrEmpty(_message))
+{
+    <p class="toast-msg" @key="_message" role="status">@_message</p>
+}
+
+@if (_registerModalTournament is not null)
+{
+    <div class="modal-overlay" @onclick="CloseRegisterModal">
+        <div class="modal-card" @onclick:stopPropagation="true">
+            <h2>Đăng ký: @_registerModalTournament.Name</h2>
+            <div class="form-field">
+                <label>Số điện thoại liên hệ</label>
+                <input class="input" @bind="_registerPhone" placeholder="09xxxxxxxx" />
+            </div>
+            @if (!string.IsNullOrEmpty(_registerError))
+            {
+                <p class="error-text">@_registerError</p>
+            }
+            <div class="form-actions">
+                <button class="btn btn-primary" @onclick="SubmitRegister">Xác nhận đăng ký</button>
+                <button class="btn btn-ghost" @onclick="CloseRegisterModal">Hủy</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<TournamentDto> _tournaments = new();
+    private HashSet<int> _myRegistrations = new();
+    private bool _loading = true;
+    private string? _message;
+    private HubConnection? _hubConnection;
+
+    private TournamentDto? _registerModalTournament;
+    private string _registerPhone = string.Empty;
+    private string? _registerError;
+
+    // Đợt 9: Bảng đấu loại trực tiếp - Player chỉ xem.
+    private int? _bracketTournamentId;
+    private List<TournamentMatchDto> _bracketMatches = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl($"{ApiOptions.BaseUrl}/hubs/bms")
+            .WithAutomaticReconnect(new ForeverRetryPolicy())
+            .Build();
+
+        // Mất kết nối rồi tự nối lại: tải lại dữ liệu vì các sự kiện phát ra lúc mất mạng đã bị lỡ.
+        _hubConnection.Reconnected += async _ =>
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        };
+
+        _hubConnection.On<object>("TournamentUpdated", async _ =>
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            await _hubConnection.StartAsync();
+        }
+        catch
+        {
+            // Falls back to manual refresh if the hub isn't reachable yet.
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        // Đợt 16: giải ở trạng thái Nháp (Admin đang soạn, chưa công bố) không hiện cho người chơi/khách.
+        _tournaments = (await TournamentApiService.GetTournamentsAsync())
+            .Where(t => !string.Equals(t.Status, "Draft", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        _myRegistrations = new HashSet<int>();
+        if (AuthState.IsPlayer)
+        {
+            foreach (var t in _tournaments.Where(t => t.Status == "Open"))
+            {
+                if (await TournamentApiService.IsRegisteredAsync(t.Id))
+                {
+                    _myRegistrations.Add(t.Id);
+                }
+            }
+        }
+
+        _loading = false;
+    }
+
+    private static string StatusLabel(string status) => status switch
+    {
+        "Open" => "Mở đăng ký",
+        "InProgress" => "Đang diễn ra",
+        "Completed" => "Đã kết thúc",
+        "Cancelled" => "Đã hủy",
+        _ => "Nháp"
+    };
+
+    private void PromptLogin()
+    {
+        _message = "Vui lòng đăng nhập để đăng ký giải đấu.";
+        NavigationManager.NavigateTo("/login");
+    }
+
+    private void OpenRegisterModal(TournamentDto t)
+    {
+        _registerModalTournament = t;
+        _registerPhone = string.Empty;
+        _registerError = null;
+    }
+
+    private void CloseRegisterModal() => _registerModalTournament = null;
+
+    private async Task SubmitRegister()
+    {
+        if (_registerModalTournament is null) return;
+
+        if (string.IsNullOrWhiteSpace(_registerPhone))
+        {
+            _registerError = "Vui lòng nhập số điện thoại.";
+            return;
+        }
+
+        var (success, error) = await TournamentApiService.RegisterAsync(_registerModalTournament.Id, _registerPhone);
+        if (success)
+        {
+            _message = "Đăng ký giải đấu thành công!";
+            _registerModalTournament = null;
+            await LoadAsync();
+        }
+        else
+        {
+            _registerError = error;
+        }
+    }
+
+    private async Task Unregister(int tournamentId)
+    {
+        var (success, error) = await TournamentApiService.UnregisterAsync(tournamentId);
+        _message = success ? "Đã hủy đăng ký." : error;
+        await LoadAsync();
+    }
+
+    private async Task ToggleBracket(TournamentDto t)
+    {
+        if (_bracketTournamentId == t.Id)
+        {
+            _bracketTournamentId = null;
+            _bracketMatches = new();
+            return;
+        }
+
+        _bracketTournamentId = t.Id;
+        _bracketMatches = await TournamentApiService.GetBracketAsync(t.Id);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
+}

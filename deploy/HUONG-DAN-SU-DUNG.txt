@@ -1,0 +1,49 @@
+﻿BMS BILLIARD – HƯỚNG DẪN SỬ DỤNG BẢN WINDOWS
+================================================
+
+Chạy ngay trên Windows 10/11 (64-bit). KHÔNG cần cài .NET, Visual Studio hay Docker.
+
+1. CHẠY
+   - Giải nén BMS-Windows.zip vào một thư mục cố định, ví dụ C:\BMS
+     (không chạy trực tiếp bên trong file .zip).
+   - Bấm đúp BMS.exe.
+   - Lần chạy đầu: cửa sổ đen hỏi đặt mật khẩu cho tài khoản Quản trị admin@bms.local
+     (ít nhất 8 ký tự, gõ 2 lần). Hãy ghi nhớ mật khẩu này.
+   - Vài giây sau trình duyệt tự mở 2 trang:
+       http://localhost:5280         Trang Người chơi (đặt bàn, thuê/mua cơ, giải đấu, ví)
+       http://localhost:5180/login   Cổng Nhân viên / Quản trị
+   - Nếu Windows hỏi cho phép truy cập mạng (Firewall): chọn Cho phép.
+
+2. TẮT
+   - Đóng cửa sổ đen "BMS Billiard - đang chạy". Cả hệ thống tắt theo.
+
+3. TÀI KHOẢN
+   - Quản trị (Admin): admin@bms.local + mật khẩu đã đặt ở lần chạy đầu.
+   - Nhân viên: Admin vào "Quản lý nhân viên" -> tạo nhân viên (Mã NV + mã PIN).
+     Nhân viên đăng nhập cổng Nhân viên bằng Mã NV + PIN.
+   - Khách: tự đăng ký ở trang Người chơi.
+
+4. CÀI NHƯ ỨNG DỤNG (PWA)
+   - Chrome/Edge: mở trang -> bấm biểu tượng "Cài đặt" trên thanh địa chỉ
+     (hoặc menu ⋮ -> Ứng dụng -> Cài đặt). Ứng dụng có biểu tượng riêng, mở như phần mềm.
+
+5. DỮ LIỆU VÀ SAO LƯU
+   - Toàn bộ dữ liệu nằm trong thư mục data\ cạnh BMS.exe
+     (bms.db = cơ sở dữ liệu, uploads\ = ảnh, settings.json = cấu hình quán).
+   - Sao lưu: tắt BMS, chép nguyên thư mục data\ sang ổ khác / USB.
+   - Khôi phục: tắt BMS, chép thư mục data\ đã sao lưu đè lên.
+   - Bắt đầu lại từ dữ liệu mẫu: tắt BMS, xóa thư mục data\ (MẤT HẾT dữ liệu!).
+   - Quên mật khẩu Admin: tắt BMS, xóa file data\admin-password.set, mở lại BMS.exe
+     để đặt mật khẩu mới.
+
+6. THÔNG TIN QUÁN, TÀI KHOẢN NGÂN HÀNG
+   - Cổng Quản trị -> "Cấu hình chung": tên quán, hotline, email, Facebook, địa chỉ,
+     tài khoản nhận chuyển khoản VietQR.
+
+7. LỖI THƯỜNG GẶP
+   - "Cổng 5080/5180/5280 đang bị chương trình khác dùng": BMS đang chạy ở cửa sổ khác,
+     hoặc phần mềm khác chiếm cổng. Đóng cửa sổ BMS cũ rồi mở lại.
+   - Trang trắng / không vào được: đợi 10–20 giây sau khi mở BMS.exe rồi tải lại (F5).
+
+Bản này dành cho 1 máy (quầy thu ngân / trình diễn). Muốn khách và nhân viên dùng bằng
+điện thoại ở bất cứ đâu: dùng bản trên máy chủ https://bmsbilliard.com (xem DEPLOY.md).

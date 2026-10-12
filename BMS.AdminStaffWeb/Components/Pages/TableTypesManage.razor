@@ -1,0 +1,229 @@
+@page "/table-types/manage"
+@rendermode InteractiveServer
+@inject TableApiService TableApiService
+@inject AuthState AuthState
+
+<h1><Icon Name="money" Size="22" /> Loại bàn &amp; giá theo giờ</h1>
+
+@if (!AuthState.IsAdmin)
+{
+    <p class="page-empty">Bạn không có quyền truy cập trang này. Vui lòng đăng nhập bằng tài khoản Admin.</p>
+}
+else
+{
+    <div class="card form-card">
+        <h2>@(_editingTypeId is null ? "Thêm loại bàn mới" : $"Sửa loại bàn #{_editingTypeId}")</h2>
+
+        <div class="form-field">
+            <label>Tên loại bàn</label>
+            <input class="input" @bind="_typeForm.Name" placeholder="VD: Bàn Lỗ" />
+        </div>
+        <div class="form-field">
+            <label>Mô tả</label>
+            <input class="input" @bind="_typeForm.Description" placeholder="VD: Kích thước chuẩn quốc tế" />
+        </div>
+
+        <div class="form-actions">
+            <button class="btn btn-primary" @onclick="SaveType">@(_editingTypeId is null ? "Thêm" : "Lưu")</button>
+            @if (_editingTypeId is not null)
+            {
+                <button class="btn btn-ghost" @onclick="ResetTypeForm">Hủy</button>
+            }
+        </div>
+
+        @if (!string.IsNullOrEmpty(_message))
+        {
+            <p class="hint-text">@_message</p>
+        }
+    </div>
+
+    <div class="section">
+        <h2>Danh sách loại bàn</h2>
+        @if (_tableTypes.Count == 0)
+        {
+            <p class="page-empty">Chưa có loại bàn nào.</p>
+        }
+        else
+        {
+            @foreach (var type in _tableTypes)
+            {
+                <div class="card" style="margin-bottom:1rem;">
+                    <div class="form-actions" style="justify-content:space-between;align-items:center;">
+                        <div>
+                            <strong>@type.Name</strong>
+                            @if (!string.IsNullOrEmpty(type.Description))
+                            {
+                                <span class="table-meta"> — @type.Description</span>
+                            }
+                        </div>
+                        <div class="row-actions">
+                            <button class="btn btn-ghost btn-sm" @onclick="() => EditType(type)">Sửa</button>
+                            <button class="btn btn-danger btn-sm" @onclick="() => DeleteType(type.Id)">Xóa</button>
+                        </div>
+                    </div>
+
+                    <h3 style="margin-top:0.75rem;">Khung giờ tính giá</h3>
+                    @if (type.Slots.Count == 0)
+                    {
+                        <p class="page-empty">Chưa có khung giờ - đang dùng giá cố định (PricePerHour) của mỗi bàn.</p>
+                    }
+                    else
+                    {
+                        <table class="data-table">
+                            <thead>
+                                <tr><th>Bắt đầu</th><th>Kết thúc</th><th>Giá/giờ</th><th>Xử lý</th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var slot in type.Slots)
+                                {
+                                    <tr>
+                                        <td>@slot.StartTime.ToString(@"hh\:mm")</td>
+                                        <td>@slot.EndTime.ToString(@"hh\:mm")</td>
+                                        <td>@slot.PricePerHour.ToString("N0") đ</td>
+                                        <td class="row-actions">
+                                            <button class="btn btn-danger btn-sm" @onclick="() => DeleteSlot(type.Id, slot.Id)">Xóa</button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+
+                    <div class="form-actions" style="align-items:center;">
+                        <input class="input input-sm" style="width:6rem;" type="time" @bind="_slotFormByType[type.Id].StartTime" />
+                        <span>đến</span>
+                        <input class="input input-sm" style="width:6rem;" type="time" @bind="_slotFormByType[type.Id].EndTime" />
+                        <input class="input input-sm" style="width:7rem;" type="number" min="0" placeholder="Giá/giờ"
+                               @bind="_slotFormByType[type.Id].PricePerHour" />
+                        <button class="btn btn-primary btn-sm" @onclick="() => AddSlot(type.Id)">Thêm khung giờ</button>
+                    </div>
+                </div>
+            }
+        }
+    </div>
+}
+
+@code {
+    private List<TableTypeDto> _tableTypes = new();
+    private TypeFormModel _typeForm = new();
+    private int? _editingTypeId;
+    private string? _message;
+
+    // Đợt 5: form thêm khung giờ mới cho mỗi loại bàn - seed key trước khi bất kỳ @bind
+    // nào tham chiếu tới nó (tránh KeyNotFoundException khi render).
+    private readonly Dictionary<int, SlotFormModel> _slotFormByType = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState.IsAdmin)
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _tableTypes = await TableApiService.GetTableTypesAsync();
+
+        foreach (var type in _tableTypes)
+        {
+            if (!_slotFormByType.ContainsKey(type.Id))
+            {
+                _slotFormByType[type.Id] = new SlotFormModel();
+            }
+        }
+    }
+
+    private void EditType(TableTypeDto type)
+    {
+        _editingTypeId = type.Id;
+        _typeForm = new TypeFormModel { Name = type.Name, Description = type.Description };
+    }
+
+    private void ResetTypeForm()
+    {
+        _editingTypeId = null;
+        _typeForm = new TypeFormModel();
+    }
+
+    private async Task SaveType()
+    {
+        if (string.IsNullOrWhiteSpace(_typeForm.Name))
+        {
+            _message = "Vui lòng nhập tên loại bàn.";
+            return;
+        }
+
+        var request = new UpsertTableTypeRequestDto(_typeForm.Name, _typeForm.Description);
+
+        var (success, error) = _editingTypeId is null
+            ? await TableApiService.CreateTableTypeAsync(request)
+            : await TableApiService.UpdateTableTypeAsync(_editingTypeId.Value, request);
+
+        _message = success ? "Đã lưu." : error;
+
+        if (success)
+        {
+            ResetTypeForm();
+            await LoadAsync();
+        }
+    }
+
+    private async Task DeleteType(int id)
+    {
+        var (success, error) = await TableApiService.DeleteTableTypeAsync(id);
+        _message = success ? "Đã xóa loại bàn." : error;
+        await LoadAsync();
+    }
+
+    private async Task AddSlot(int tableTypeId)
+    {
+        if (!_slotFormByType.TryGetValue(tableTypeId, out var form)) return;
+
+        if (form.StartTime is null || form.EndTime is null)
+        {
+            _message = "Vui lòng nhập đủ giờ bắt đầu/kết thúc.";
+            return;
+        }
+
+        if (form.PricePerHour < 0)
+        {
+            _message = "Giá theo giờ không được âm.";
+            return;
+        }
+
+        var start = form.StartTime.Value.ToTimeSpan();
+        var end = form.EndTime.Value.ToTimeSpan();
+
+        var (success, error) = await TableApiService.AddPricingSlotAsync(
+            tableTypeId, new UpsertPricingSlotRequestDto(start, end, form.PricePerHour));
+
+        _message = success ? "Đã thêm khung giờ." : error;
+
+        if (success)
+        {
+            _slotFormByType[tableTypeId] = new SlotFormModel();
+            await LoadAsync();
+        }
+    }
+
+    private async Task DeleteSlot(int tableTypeId, int slotId)
+    {
+        var (success, error) = await TableApiService.DeletePricingSlotAsync(slotId);
+        _message = success ? "Đã xóa khung giờ." : error;
+        await LoadAsync();
+    }
+
+    private class TypeFormModel
+    {
+        public string Name { get; set; } = string.Empty;
+        public string? Description { get; set; }
+    }
+
+    private class SlotFormModel
+    {
+        public TimeOnly? StartTime { get; set; } = new TimeOnly(8, 0);
+        public TimeOnly? EndTime { get; set; } = new TimeOnly(17, 0);
+        public decimal PricePerHour { get; set; } = 60000m;
+    }
+}

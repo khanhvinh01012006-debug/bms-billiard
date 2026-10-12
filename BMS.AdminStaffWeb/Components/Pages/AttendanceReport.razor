@@ -1,0 +1,104 @@
+@page "/attendance"
+@rendermode InteractiveServer
+@inject AttendanceApiService AttendanceApiService
+@inject AccountApiService AccountApiService
+@inject AuthState AuthState
+
+<h1><Icon Name="chart" Size="22" /> Báo cáo Chấm công</h1>
+
+@if (!AuthState.IsAdmin)
+{
+    <p class="page-empty">Bạn không có quyền truy cập trang này. Vui lòng đăng nhập bằng tài khoản Admin.</p>
+}
+else
+{
+    <div class="form-actions filter-bar">
+        <select class="input" @bind="_filterStaffId" @bind:after="LoadAsync">
+            <option value="">-- Tất cả nhân viên --</option>
+            @foreach (var s in _staffList)
+            {
+                <option value="@s.Id">@s.FullName</option>
+            }
+        </select>
+        <input class="input" type="date" @bind="_filterFrom" @bind:after="LoadAsync" />
+        <input class="input" type="date" @bind="_filterTo" @bind:after="LoadAsync" />
+    </div>
+
+    @if (_records.Count == 0)
+    {
+        <p class="page-empty">Không có bản ghi chấm công nào.</p>
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Nhân viên</th>
+                    <th>Vào ca</th>
+                    <th>Ra ca</th>
+                    <th>Số giờ làm</th>
+                    <th>Ghi chú</th>
+                    <th>Ước tính lương</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var a in _records)
+                {
+                    <tr>
+                        <td>@a.StaffName</td>
+                        <td>@a.ClockInAtUtc.ToLocalTime().ToString("HH:mm dd/MM/yyyy")</td>
+                        <td>@(a.ClockOutAtUtc?.ToLocalTime().ToString("HH:mm dd/MM/yyyy") ?? "—")</td>
+                        <td>@(a.HoursWorked is double h ? h.ToString("N2") : "—")</td>
+                        <td>@(a.Note ?? "—")</td>
+                        <td>@(EstimatedWage(a) is decimal wage ? wage.ToString("N0") + " đ" : "—")</td>
+                    </tr>
+                }
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td colspan="3"><strong>Tổng số giờ đã làm</strong></td>
+                    <td colspan="2"><strong>@_records.Where(a => a.HoursWorked is not null).Sum(a => a.HoursWorked!.Value).ToString("N2")</strong></td>
+                    <td><strong>@TotalEstimatedWage.ToString("N0") đ</strong></td>
+                </tr>
+            </tfoot>
+        </table>
+    }
+}
+
+@code {
+    private List<AttendanceDto> _records = new();
+    private List<StaffAccountDto> _staffList = new();
+    private string _filterStaffId = "";
+    private DateTime? _filterFrom;
+    private DateTime? _filterTo;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsAdmin)
+        {
+            return;
+        }
+
+        _staffList = await AccountApiService.GetStaffListAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        int? staffId = int.TryParse(_filterStaffId, out var id) ? id : null;
+        _records = await AttendanceApiService.GetAllAsync(staffId, _filterFrom, _filterTo);
+    }
+
+    // Đợt 9: Ước tính lương = số giờ làm * lương/giờ của nhân viên đó (null nếu chưa cấu hình).
+    private decimal? EstimatedWage(AttendanceDto a)
+    {
+        if (a.HoursWorked is not double hours) return null;
+
+        var staff = _staffList.FirstOrDefault(s => s.Id == a.StaffAccountId);
+        if (staff?.WageRatePerHour is not decimal rate) return null;
+
+        return (decimal)hours * rate;
+    }
+
+    private decimal TotalEstimatedWage => _records.Select(EstimatedWage).Where(w => w is not null).Sum(w => w!.Value);
+}

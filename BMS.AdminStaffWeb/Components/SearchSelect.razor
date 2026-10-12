@@ -1,0 +1,130 @@
+@* Đợt 16: ô chọn có tìm kiếm + mũi tên xổ xuống (combobox). Gõ để lọc danh sách, bấm mũi
+   tên để xem tất cả, bấm một mục để chọn. AllowCustom = true cho phép giữ giá trị gõ tay
+   khi không có trong danh sách (vd. thêm danh mục mới). *@
+
+<div class="search-select @(_open ? "is-open" : "")">
+    <input class="input search-select-input"
+           value="@_text"
+           placeholder="@Placeholder"
+           @oninput="OnInput"
+           @onfocus="Open"
+           @onblur="OnBlur"
+           @onkeydown="OnKeyDown" />
+    <button type="button" class="search-select-arrow" tabindex="-1" aria-label="Mở danh sách"
+            @onmousedown="Toggle" @onmousedown:preventDefault="true">
+        <Icon Name="expand_more" Size="20" />
+    </button>
+
+    @if (_open)
+    {
+        var items = Filtered.ToList();
+        <ul class="search-select-list">
+            @if (items.Count == 0)
+            {
+                <li class="search-select-empty">
+                    @(AllowCustom && !string.IsNullOrWhiteSpace(_text) ? $"Dùng “{_text.Trim()}” làm giá trị mới" : "Không có mục phù hợp")
+                </li>
+            }
+            @foreach (var option in items)
+            {
+                <li class="search-select-item @(option == Value ? "is-selected" : "")"
+                    @onmousedown="() => Select(option)" @onmousedown:preventDefault="true">
+                    @option
+                    @if (option == Value)
+                    {
+                        <Icon Name="check" Size="16" />
+                    }
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public IEnumerable<string> Options { get; set; } = Array.Empty<string>();
+    [Parameter] public string Placeholder { get; set; } = "Chọn...";
+    [Parameter] public bool AllowCustom { get; set; } = true;
+
+    private string _text = string.Empty;
+    private bool _open;
+    private bool _filtering;
+
+    protected override void OnParametersSet()
+    {
+        if (!_open)
+        {
+            _text = Value ?? string.Empty;
+        }
+    }
+
+    private IEnumerable<string> Filtered =>
+        !_filtering || string.IsNullOrWhiteSpace(_text)
+            ? Options
+            : Options.Where(o => o.Contains(_text.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    private void Open()
+    {
+        _open = true;
+        _filtering = false;
+    }
+
+    private void Toggle()
+    {
+        _open = !_open;
+        _filtering = false;
+    }
+
+    private void OnInput(ChangeEventArgs e)
+    {
+        _text = e.Value?.ToString() ?? string.Empty;
+        _open = true;
+        _filtering = true;
+    }
+
+    private async Task Select(string option)
+    {
+        _text = option;
+        _open = false;
+        _filtering = false;
+        await ValueChanged.InvokeAsync(option);
+    }
+
+    private async Task OnBlur()
+    {
+        _open = false;
+        _filtering = false;
+        var typed = _text.Trim();
+        var match = Options.FirstOrDefault(o => string.Equals(o, typed, StringComparison.OrdinalIgnoreCase));
+        if (match is not null)
+        {
+            _text = match;
+            await ValueChanged.InvokeAsync(match);
+        }
+        else if (AllowCustom)
+        {
+            await ValueChanged.InvokeAsync(typed.Length == 0 ? null : typed);
+        }
+        else
+        {
+            _text = Value ?? string.Empty;
+        }
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            var first = Filtered.FirstOrDefault();
+            if (first is not null)
+            {
+                await Select(first);
+            }
+        }
+        else if (e.Key == "Escape")
+        {
+            _open = false;
+        }
+    }
+}

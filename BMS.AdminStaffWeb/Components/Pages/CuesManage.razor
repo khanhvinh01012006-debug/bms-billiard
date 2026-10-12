@@ -1,0 +1,225 @@
+@page "/cues/manage"
+@rendermode InteractiveServer
+@inject CueApiService CueApiService
+@inject AuthState AuthState
+
+<h1><Icon Name="cue" Size="22" /> Quản lý cơ</h1>
+
+@if (!AuthState.IsAdmin)
+{
+    <p class="page-empty">Bạn không có quyền truy cập trang này. Vui lòng đăng nhập bằng tài khoản Admin.</p>
+}
+else
+{
+    <div class="card form-card">
+        <h2>@(_editingId is null ? "Thêm cơ mới" : $"Sửa cơ #{_editingId}")</h2>
+
+        <div class="form-field">
+            <label>Tên cơ</label>
+            <input class="input" @bind="_form.Name" />
+        </div>
+        <div class="form-field">
+            <label>Giá / giờ (đ)</label>
+            <input class="input" type="number" @bind="_form.PricePerHour" />
+        </div>
+        <div class="form-field">
+            <label>Số lượng</label>
+            <input class="input" type="number" @bind="_form.AvailableCount" />
+        </div>
+        <div class="form-field">
+            <label>Nhóm hàng (tùy chọn - VD: Cơ, Bàn, Phụ kiện)</label>
+            <input class="input" @bind="_form.Category" />
+        </div>
+        <div class="form-field">
+            <label>Hãng (tùy chọn - VD: Predator, Cuetec)</label>
+            <input class="input" @bind="_form.Brand" />
+        </div>
+        <div class="form-field">
+            <label>Hình ảnh</label>
+            <InputFile OnChange="HandleFileSelected" accept=".png,.jpg,.jpeg,.gif,.svg,.webp" />
+            @if (!string.IsNullOrEmpty(_form.ImageUrl))
+            {
+                <img src="@_form.ImageUrl" alt="Ảnh cơ" class="preview-image" />
+            }
+        </div>
+        <div class="form-field">
+            <label>Mô tả</label>
+            <textarea class="input" rows="3" @bind="_form.Description"></textarea>
+        </div>
+        <div class="form-field">
+            <label>
+                <input type="checkbox" @bind="_form.IsForSale" /> Cho bán
+            </label>
+        </div>
+        @if (_form.IsForSale)
+        {
+            <div class="form-field">
+                <label>Giá bán (đ)</label>
+                <input class="input" type="number" @bind="_form.SalePrice" />
+            </div>
+        }
+
+        <div class="form-actions">
+            <button class="btn btn-primary" @onclick="Save">@(_editingId is null ? "Thêm" : "Lưu")</button>
+            @if (_editingId is not null)
+            {
+                <button class="btn btn-ghost" @onclick="ResetForm">Hủy</button>
+            }
+        </div>
+
+        @if (!string.IsNullOrEmpty(_message))
+        {
+            <p class="hint-text">@_message</p>
+        }
+    </div>
+
+    <div class="section">
+        <h2>Danh sách cơ</h2>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Tên</th>
+                    <th>Giá/giờ</th>
+                    <th>Số lượng còn</th>
+                    <th>Xử lý</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var cue in _cues)
+                {
+                    <tr>
+                        <td>
+                            <span class="inv-name">
+                                <ProductImage Url="@cue.ImageUrl" FallbackBase="@ProductImages.ForCue(cue.Name, cue.Brand, cue.Category)" Alt="@cue.Name"
+                                              Class="inv-thumb" Width="48" Height="36" Sizes="48px" />
+                                <span>@cue.Name</span>
+                            </span>
+                        </td>
+                        <td>@cue.PricePerHour.ToString("N0")</td>
+                        <td>@cue.AvailableCount</td>
+                        <td class="row-actions">
+                            <button class="btn btn-ghost btn-sm" @onclick="() => Edit(cue)">Sửa</button>
+                            <button class="btn btn-danger btn-sm" @onclick="() => Delete(cue.Id)">Xóa</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private List<CueDto> _cues = new();
+    private CueFormModel _form = new();
+    private int? _editingId;
+    private string? _message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState.IsAdmin)
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _cues = await CueApiService.GetCuesAsync();
+    }
+
+    private void Edit(CueDto cue)
+    {
+        _editingId = cue.Id;
+        _form = new CueFormModel
+        {
+            Name = cue.Name,
+            PricePerHour = cue.PricePerHour,
+            AvailableCount = cue.AvailableCount,
+            ImageUrl = cue.ImageUrl,
+            Description = cue.Description,
+            IsForSale = cue.IsForSale,
+            SalePrice = cue.SalePrice ?? 0m,
+            Brand = cue.Brand,
+            Category = cue.Category
+        };
+    }
+
+    private void ResetForm()
+    {
+        _editingId = null;
+        _form = new CueFormModel();
+    }
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+
+        _message = "Đang tải ảnh lên...";
+        try
+        {
+            const long maxSize = 5 * 1024 * 1024;
+            await using var stream = file.OpenReadStream(maxSize);
+            using var memoryStream = new MemoryStream();
+            await stream.CopyToAsync(memoryStream);
+
+            var (success, url, error) = await CueApiService.UploadImageAsync(
+                memoryStream.ToArray(), file.Name, file.ContentType);
+
+            if (success)
+            {
+                _form.ImageUrl = url;
+                _message = "Đã tải ảnh lên (chỉ mới ở bộ nhớ tạm) — bấm nút \"Lưu\" bên dưới để áp dụng vào cơ, nếu không ảnh sẽ KHÔNG được lưu.";
+            }
+            else
+            {
+                _message = "Tải ảnh thất bại: " + error;
+            }
+        }
+        catch (Exception ex)
+        {
+            _message = "Tải ảnh thất bại: " + ex.Message +
+                " (Nếu là lỗi kết nối/chứng chỉ HTTPS, hãy chạy 'dotnet dev-certs https --trust' rồi khởi động lại.)";
+        }
+    }
+
+    private async Task Save()
+    {
+        var request = new UpsertCueRequestDto(
+            _form.Name, _form.PricePerHour, _form.AvailableCount, _form.ImageUrl,
+            _form.IsForSale, _form.IsForSale ? _form.SalePrice : null, _form.Description,
+            _form.Brand, _form.Category);
+
+        var (success, error) = _editingId is null
+            ? await CueApiService.CreateCueAsync(request)
+            : await CueApiService.UpdateCueAsync(_editingId.Value, request);
+
+        _message = success ? "Đã lưu." : error;
+
+        if (success)
+        {
+            ResetForm();
+            await LoadAsync();
+        }
+    }
+
+    private async Task Delete(int id)
+    {
+        var (success, error) = await CueApiService.DeleteCueAsync(id);
+        _message = success ? "Đã xóa." : error;
+        await LoadAsync();
+    }
+
+    private class CueFormModel
+    {
+        public string Name { get; set; } = string.Empty;
+        public decimal PricePerHour { get; set; } = 10000m;
+        public int AvailableCount { get; set; } = 5;
+        public string? ImageUrl { get; set; }
+        public string? Description { get; set; }
+        public bool IsForSale { get; set; }
+        public decimal SalePrice { get; set; }
+        public string? Brand { get; set; }
+        public string? Category { get; set; }
+    }
+}

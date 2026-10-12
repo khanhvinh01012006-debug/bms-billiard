@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Đợt 2 (PlayerApp): bỏ định nghĩa lại "Maui.SplashTheme" ở đây. Bản cũ trỏ tới
+     @drawable/splash_screen và attr windowSplashScreenBackground KHÔNG tồn tại nên app
+     không build được (APT2260). MAUI tự sinh theme splash từ <MauiSplashScreen> trong csproj. -->
+<resources>
+</resources>

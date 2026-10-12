@@ -1,0 +1,275 @@
+@rendermode InteractiveServer
+@inject AuthState AuthState
+@inject StaffNotificationService StaffNotifications
+@inject NavigationManager NavigationManager
+@implements IDisposable
+
+@* Thanh bên theo thiết kế BilliardHub (rộng 240px, mục đang chọn nền xanh nhạt). Số liệu
+   (bàn đang chơi, doanh thu hôm nay) lấy từ API thật, truyền vào từ MainLayout.
+   Màn hình < 1024px: thanh bên ẩn, thay bằng thanh điều hướng dưới theo vai trò; nút
+   "Thêm" mở lại chính thanh bên này dạng ngăn kéo (đủ mọi mục, không mất chức năng). *@
+
+<nav class="sidebar @(_drawerOpen ? "is-open" : "")">
+    <div class="sidebar-top">
+        <a class="sidebar-brand" href="@(AuthState.IsAdmin ? "dashboard" : "ops")">
+            <img src="images/logo-mark.svg" width="32" height="32" alt="" />
+            <span class="sidebar-brand-text">
+                <span class="sidebar-brand-name">BMS Billiard</span>
+                <span class="sidebar-brand-sub">Club &amp; Quản trị</span>
+            </span>
+        </a>
+
+        @if (AuthState.IsAdmin)
+        {
+            <div class="sidebar-status">
+                <div class="sidebar-status-left">
+                    <span class="sidebar-status-dot"></span>
+                    <span>Bàn đang chơi</span>
+                </div>
+                <span class="sidebar-status-pill">@OccupiedCount/@TotalTables BÀN</span>
+            </div>
+        }
+
+        <div class="sidebar-links">
+            @if (AuthState.IsAdmin)
+            {
+                <NavLink class="sidebar-link" href="dashboard">
+                    <Icon Name="space_dashboard" Size="20" />
+                    <span>Tổng quan CLB</span>
+                </NavLink>
+            }
+
+            @if (AuthState.IsAdmin)
+            {
+                <NavLink class="sidebar-link" href="tables" Match="NavLinkMatch.All">
+                    <Icon Name="sports_score" Size="20" />
+                    <span>Quản lý Bàn chơi (Live)</span>
+                    <span class="sidebar-count">@OccupiedCount/@TotalTables</span>
+                </NavLink>
+            }
+
+            @if (AuthState.IsStaffOrAdmin)
+            {
+                @* Nhóm vận hành tại quầy (trước đây là "chế độ nhân viên" trong PlayerWeb). *@
+                <div class="sidebar-section">Vận hành</div>
+                <NavLink class="sidebar-link" href="ops" Match="NavLinkMatch.All">
+                    <Icon Name="grid" Size="20" />
+                    <span>Bàn chơi</span>
+                </NavLink>
+                <NavLink class="sidebar-link" href="ops/cues">
+                    <Icon Name="cue" Size="20" />
+                    <span>Thuê &amp; Mua Cơ</span>
+                </NavLink>
+                <NavLink class="sidebar-link" href="ops/purchase-requests">
+                    <Icon Name="shopping_bag" Size="20" />
+                    <span>Yêu cầu mua cơ</span>
+                    @if (StaffNotifications.PendingPurchaseCount > 0)
+                    {
+                        <span class="sidebar-count sidebar-count-alert">@StaffNotifications.PendingPurchaseCount</span>
+                    }
+                </NavLink>
+                @if (AuthState.IsStaff)
+                {
+                    <NavLink class="sidebar-link" href="staff/payments">
+                        <Icon Name="card" Size="20" />
+                        <span>Duyệt nạp tiền</span>
+                        @if (StaffNotifications.PendingTopUpCount > 0)
+                        {
+                            <span class="sidebar-count sidebar-count-alert">@StaffNotifications.PendingTopUpCount</span>
+                        }
+                    </NavLink>
+                }
+                <NavLink class="sidebar-link" href="inbox">
+                    <Icon Name="chat" Size="20" />
+                    <span>Hộp thư</span>
+                    @if (StaffNotifications.UnreadChatCount > 0)
+                    {
+                        <span class="sidebar-count sidebar-count-alert">@StaffNotifications.UnreadChatCount</span>
+                    }
+                </NavLink>
+                <NavLink class="sidebar-link" href="staff/shift">
+                    <Icon Name="clock" Size="20" />
+                    <span>Ca làm việc</span>
+                </NavLink>
+                <NavLink class="sidebar-link" href="staff/history">
+                    <Icon Name="history" Size="20" />
+                    <span>Lịch sử phiên chơi</span>
+                </NavLink>
+                @if (AuthState.IsStaff)
+                {
+                    <NavLink class="sidebar-link" href="ops/tournaments">
+                        <Icon Name="trophy" Size="20" />
+                        <span>Giải đấu</span>
+                    </NavLink>
+                }
+            }
+
+            @if (AuthState.IsAdmin)
+            {
+                <div class="sidebar-section">Quản lý</div>
+                <NavLink class="sidebar-link" href="tables/manage">
+                    <Icon Name="table_bar" Size="20" />
+                    <span>Danh sách bàn</span>
+                </NavLink>
+                <NavLink class="sidebar-link" href="table-types/manage">
+                    <Icon Name="payments" Size="20" />
+                    <span>Loại bàn &amp; giá theo giờ</span>
+                </NavLink>
+                <NavLink class="sidebar-link" href="cues/manage">
+                    <Icon Name="diamond" Size="20" />
+                    <span>Chợ &amp; Cho thuê Cơ</span>
+                </NavLink>
+                <NavLink class="sidebar-link" href="inventory/manage">
+                    <Icon Name="inventory_2" Size="20" />
+                    <span>Quản lý Kho</span>
+                </NavLink>
+                <NavLink class="sidebar-link" href="tournaments/manage">
+                    <Icon Name="emoji_events" Size="20" />
+                    <span>Quản lý Giải đấu</span>
+                </NavLink>
+                <NavLink class="sidebar-link" href="staff/manage">
+                    <Icon Name="badge" Size="20" />
+                    <span>Quản lý nhân viên</span>
+                </NavLink>
+                <NavLink class="sidebar-link" href="members">
+                    <Icon Name="group" Size="20" />
+                    <span>Hội viên</span>
+                </NavLink>
+
+                <div class="sidebar-section">Tài chính &amp; Báo cáo</div>
+                <NavLink class="sidebar-link" href="topups">
+                    <Icon Name="account_balance_wallet" Size="20" />
+                    <span>Duyệt nạp tiền</span>
+                    @if (PendingTopUps > 0)
+                    {
+                        <span class="sidebar-count sidebar-count-alert">@PendingTopUps</span>
+                    }
+                </NavLink>
+                <NavLink class="sidebar-link" href="payments">
+                    <Icon Name="receipt_long" Size="20" />
+                    <span>Báo cáo &amp; Doanh thu</span>
+                </NavLink>
+                <NavLink class="sidebar-link" href="shifts">
+                    <Icon Name="manage_history" Size="20" />
+                    <span>Lịch sử Ca làm việc</span>
+                </NavLink>
+                <NavLink class="sidebar-link" href="attendance">
+                    <Icon Name="analytics" Size="20" />
+                    <span>Báo cáo Chấm công</span>
+                </NavLink>
+                <NavLink class="sidebar-link" href="settings">
+                    <Icon Name="settings" Size="20" />
+                    <span>Cấu hình chung</span>
+                </NavLink>
+            }
+        </div>
+    </div>
+
+    @* Tài khoản + Đăng xuất chỉ còn ở góc trên phải (menu của avatar trong MainLayout). *@
+</nav>
+
+@if (_drawerOpen)
+{
+    <div class="drawer-backdrop" @onclick="CloseDrawer"></div>
+}
+
+@if (AuthState.IsStaffOrAdmin)
+{
+    @* Thanh điều hướng dưới (điện thoại/máy tính bảng): các việc dùng nhiều nhất, bấm một tay. *@
+    <nav class="mobile-nav" aria-label="Điều hướng nhanh">
+        @if (AuthState.IsAdmin)
+        {
+            <NavLink class="mobile-nav-link" href="dashboard">
+                <Icon Name="space_dashboard" Size="22" />
+                <span>Tổng quan</span>
+            </NavLink>
+            <NavLink class="mobile-nav-link" href="tables" Match="NavLinkMatch.All">
+                <Icon Name="sports_score" Size="22" />
+                <span>Bàn Live</span>
+            </NavLink>
+            <NavLink class="mobile-nav-link" href="topups">
+                <Icon Name="account_balance_wallet" Size="22" />
+                <span>Duyệt nạp</span>
+                @if (PendingTopUps > 0)
+                {
+                    <span class="mobile-nav-badge">@PendingTopUps</span>
+                }
+            </NavLink>
+            <NavLink class="mobile-nav-link" href="ops" Match="NavLinkMatch.All">
+                <Icon Name="grid" Size="22" />
+                <span>Vận hành</span>
+            </NavLink>
+        }
+        else
+        {
+            <NavLink class="mobile-nav-link" href="ops" Match="NavLinkMatch.All">
+                <Icon Name="grid" Size="22" />
+                <span>Bàn chơi</span>
+            </NavLink>
+            <NavLink class="mobile-nav-link" href="staff/payments">
+                <Icon Name="card" Size="22" />
+                <span>Duyệt nạp</span>
+                @if (StaffNotifications.PendingTopUpCount > 0)
+                {
+                    <span class="mobile-nav-badge">@StaffNotifications.PendingTopUpCount</span>
+                }
+            </NavLink>
+            <NavLink class="mobile-nav-link" href="inbox">
+                <Icon Name="chat" Size="22" />
+                <span>Hộp thư</span>
+                @if (StaffNotifications.UnreadChatCount > 0)
+                {
+                    <span class="mobile-nav-badge">@StaffNotifications.UnreadChatCount</span>
+                }
+            </NavLink>
+            <NavLink class="mobile-nav-link" href="staff/shift">
+                <Icon Name="clock" Size="22" />
+                <span>Ca làm</span>
+            </NavLink>
+        }
+        <button type="button" class="mobile-nav-link mobile-nav-more @(_drawerOpen ? "active" : "")" @onclick="ToggleDrawer" aria-expanded="@(_drawerOpen ? "true" : "false")">
+            <Icon Name="menu" Size="22" />
+            <span>Thêm</span>
+        </button>
+    </nav>
+}
+
+@code {
+    [Parameter] public int OccupiedCount { get; set; }
+    [Parameter] public int TotalTables { get; set; }
+    [Parameter] public int PendingTopUps { get; set; }
+    [Parameter] public decimal TodayRevenue { get; set; }
+
+    private bool _drawerOpen;
+
+    protected override void OnInitialized()
+    {
+        AuthState.Changed += StateHasChanged;
+        StaffNotifications.Changed += OnNotificationsChanged;
+        NavigationManager.LocationChanged += OnLocationChanged;
+    }
+
+    private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+
+    private void CloseDrawer() => _drawerOpen = false;
+
+    // Chọn một mục trong ngăn kéo -> chuyển trang -> tự đóng ngăn kéo.
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        if (_drawerOpen)
+        {
+            _drawerOpen = false;
+            _ = InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // Số đếm được cập nhật từ luồng SignalR -> phải quay về luồng render của Blazor.
+    private void OnNotificationsChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        AuthState.Changed -= StateHasChanged;
+        StaffNotifications.Changed -= OnNotificationsChanged;
+        NavigationManager.LocationChanged -= OnLocationChanged;
+    }
+}

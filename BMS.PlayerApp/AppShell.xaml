@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<Shell xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+       xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+       xmlns:local="clr-namespace:BMS.PlayerApp"
+       x:Class="BMS.PlayerApp.AppShell"
+       Shell.FlyoutBehavior="Disabled"
+       Title="BMS Player">
+
+    <!-- Đợt 2: theo Stitch "tinh gọn" mobile - thanh điều hướng dưới nền surface-container-lowest,
+         mục đang chọn màu emerald (text-primary), mục khác màu on-surface-variant; thanh tiêu đề
+         của các trang con (Đăng nhập, Đăng ký...) cùng nền tối. -->
+    <Shell.Resources>
+        <ResourceDictionary>
+            <Style TargetType="Element" x:Key="ShellBase">
+                <Setter Property="Shell.BackgroundColor" Value="{StaticResource Surface}" />
+                <Setter Property="Shell.ForegroundColor" Value="{StaticResource OnSurface}" />
+                <Setter Property="Shell.TitleColor" Value="{StaticResource OnSurface}" />
+                <Setter Property="Shell.DisabledColor" Value="{StaticResource Outline}" />
+                <Setter Property="Shell.UnselectedColor" Value="{StaticResource OnSurfaceVariant}" />
+                <Setter Property="Shell.TabBarBackgroundColor" Value="{StaticResource SurfaceLowest}" />
+                <Setter Property="Shell.TabBarForegroundColor" Value="{StaticResource Primary}" />
+                <Setter Property="Shell.TabBarUnselectedColor" Value="{StaticResource OnSurfaceVariant}" />
+                <Setter Property="Shell.TabBarTitleColor" Value="{StaticResource Primary}" />
+            </Style>
+            <Style TargetType="TabBar" BasedOn="{StaticResource ShellBase}" />
+            <Style TargetType="ShellContent" BasedOn="{StaticResource ShellBase}" />
+        </ResourceDictionary>
+    </Shell.Resources>
+
+    <TabBar Style="{StaticResource ShellBase}">
+        <ShellContent Title="Bàn chơi"
+                      ContentTemplate="{DataTemplate local:MainPage}"
+                      Route="tables">
+            <ShellContent.Icon>
+                <FontImageSource FontFamily="MaterialIcons" Glyph="&#xe871;" Size="24" />
+            </ShellContent.Icon>
+        </ShellContent>
+        <ShellContent Title="Thuê cơ"
+                      ContentTemplate="{DataTemplate local:CuesPage}"
+                      Route="cues">
+            <ShellContent.Icon>
+                <FontImageSource FontFamily="MaterialIcons" Glyph="&#xf1cc;" Size="24" />
+            </ShellContent.Icon>
+        </ShellContent>
+        <ShellContent Title="Ghép trận"
+                      ContentTemplate="{DataTemplate local:MatchesPage}"
+                      Route="matches">
+            <ShellContent.Icon>
+                <FontImageSource FontFamily="MaterialIcons" Glyph="&#xf233;" Size="24" />
+            </ShellContent.Icon>
+        </ShellContent>
+    </TabBar>
+
+</Shell>

@@ -1,0 +1,152 @@
+@page "/payments"
+@rendermode InteractiveServer
+@inject WalletApiService WalletApiService
+@inject AuthState AuthState
+@inject IConfiguration Configuration
+@implements IAsyncDisposable
+@using Microsoft.AspNetCore.SignalR.Client
+
+<h1><Icon Name="card" Size="22" /> Thanh toán</h1>
+
+@if (!AuthState.IsAdmin)
+{
+    <p class="page-empty">Bạn không có quyền truy cập trang này. Vui lòng đăng nhập bằng tài khoản Admin.</p>
+}
+else
+{
+    <div class="section">
+        <h2>Báo cáo thanh toán</h2>
+        <div class="form-actions filter-bar">
+            <select class="input" @bind="_filterMethod" @bind:after="LoadReportAsync">
+                <option value="">-- Tất cả phương thức --</option>
+                <option value="Wallet">Thẻ hội viên (Ví)</option>
+                <option value="Cash">Tiền mặt</option>
+                <option value="BankTransfer">Chuyển khoản</option>
+            </select>
+        </div>
+
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Khách hàng</th>
+                    <th>Phương thức</th>
+                    <th>Số tiền</th>
+                    <th>Ghi chú</th>
+                    <th>Thời gian</th>
+                    <th>Người xử lý</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (_report.Count == 0)
+                {
+                    <tr><td colspan="6" class="page-empty">Chưa có giao dịch thanh toán nào.</td></tr>
+                }
+                else
+                {
+                    @foreach (var t in _report)
+                    {
+                        <tr>
+                            <td>@t.AccountName</td>
+                            <td>@MethodLabel(t.Method)</td>
+                            <td>@t.Amount.ToString("N0") đ</td>
+                            <td>@(t.Note ?? "—")</td>
+                            <td>@t.CreatedAtUtc.ToLocalTime().ToString("HH:mm dd/MM/yyyy")</td>
+                            <td>@(t.ProcessedByName ?? "—")</td>
+                        </tr>
+                    }
+                }
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td colspan="1"><strong>Ví</strong></td>
+                    <td colspan="5"><strong>@TotalByMethod("Wallet").ToString("N0") đ</strong></td>
+                </tr>
+                <tr>
+                    <td colspan="1"><strong>Tiền mặt</strong></td>
+                    <td colspan="5"><strong>@TotalByMethod("Cash").ToString("N0") đ</strong></td>
+                </tr>
+                <tr>
+                    <td colspan="1"><strong>Chuyển khoản</strong></td>
+                    <td colspan="5"><strong>@TotalByMethod("BankTransfer").ToString("N0") đ</strong></td>
+                </tr>
+                <tr>
+                    <td colspan="1"><strong>Tổng doanh thu</strong></td>
+                    <td colspan="5"><strong>@TotalRevenue.ToString("N0") đ</strong></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+}
+
+@code {
+    private List<TransactionDto> _report = new();
+    private string _filterMethod = "";
+    private HubConnection? _hubConnection;
+
+    private decimal TotalByMethod(string method) => _report.Where(t => t.Method == method).Sum(t => t.Amount);
+    private decimal TotalRevenue => _report.Sum(t => t.Amount);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsAdmin)
+        {
+            return;
+        }
+
+        await LoadReportAsync();
+
+        var apiBaseUrl = Configuration["Api:BaseUrl"] ?? "https://localhost:5001";
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl($"{apiBaseUrl}/hubs/bms")
+            .WithAutomaticReconnect(new ForeverRetryPolicy())
+            .Build();
+
+        // Mất kết nối rồi tự nối lại: tải lại dữ liệu vì các sự kiện phát ra lúc mất mạng đã bị lỡ.
+        _hubConnection.Reconnected += async _ =>
+        {
+            await LoadReportAsync();
+            await InvokeAsync(StateHasChanged);
+        };
+
+        _hubConnection.On<object>("TransactionCreated", async _ =>
+        {
+            await LoadReportAsync();
+            await InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            await _hubConnection.StartAsync();
+        }
+        catch
+        {
+            // Falls back to manual refresh if the hub isn't reachable yet.
+        }
+    }
+
+    private async Task LoadReportAsync()
+    {
+        // Chỉ giao dịch đã Approved mới tính là doanh thu thật (thanh toán qua
+        // complete-payment/PayWithWallet luôn tự động Approved).
+        _report = await WalletApiService.GetAllTransactionsAsync(
+            "Approved",
+            string.IsNullOrEmpty(_filterMethod) ? null : _filterMethod,
+            "Payment");
+    }
+
+    private static string MethodLabel(string method) => method switch
+    {
+        "Wallet" => "Thẻ hội viên (Ví)",
+        "Cash" => "Tiền mặt",
+        "BankTransfer" => "Chuyển khoản",
+        _ => method
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
+}

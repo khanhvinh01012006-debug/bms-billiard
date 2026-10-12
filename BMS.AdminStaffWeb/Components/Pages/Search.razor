@@ -1,0 +1,132 @@
+@page "/search"
+@rendermode InteractiveServer
+@inject TableApiService TableApiService
+@inject WalletApiService WalletApiService
+@inject CueApiService CueApiService
+@inject AccountApiService AccountApiService
+@inject AuthState AuthState
+
+@* Đợt 16: trang kết quả cho ô tìm kiếm trên header (Stitch). Chỉ đọc dữ liệu qua các API
+   sẵn có rồi lọc phía giao diện - không thêm/sửa API. *@
+
+<div class="page-head">
+    <span class="page-eyebrow"><span class="page-eyebrow-dot"></span>Tìm kiếm toàn hệ thống</span>
+    <h1>Kết quả cho “@Q”</h1>
+</div>
+
+@if (!AuthState.IsAdmin)
+{
+    <p class="page-empty">Bạn cần đăng nhập bằng tài khoản Admin để tìm kiếm.</p>
+}
+else if (_loading)
+{
+    <p class="hint-text">Đang tìm...</p>
+}
+else if (string.IsNullOrWhiteSpace(Q))
+{
+    <p class="page-empty">Nhập từ khóa vào ô tìm kiếm phía trên.</p>
+}
+else
+{
+    var total = _tables.Count + _members.Count + _cues.Count + _staff.Count;
+    <p class="hint-text">Tìm thấy @total kết quả.</p>
+
+    <div class="search-grid">
+        <section class="dl-panel">
+            <h2><Icon Name="sports_score" Size="20" /> Bàn chơi (@_tables.Count)</h2>
+            @if (_tables.Count == 0)
+            {
+                <p class="page-empty">Không có bàn phù hợp.</p>
+            }
+            @foreach (var t in _tables)
+            {
+                <a class="search-row" href="tables">
+                    <span class="search-row-main">@t.Name</span>
+                    <span class="search-row-sub">@(t.TableTypeName ?? "Chưa phân loại") · ₫ @t.PricePerHour.ToString("N0")/h</span>
+                </a>
+            }
+        </section>
+
+        <section class="dl-panel">
+            <h2><Icon Name="group" Size="20" /> Hội viên (@_members.Count)</h2>
+            @if (_members.Count == 0)
+            {
+                <p class="page-empty">Không có hội viên phù hợp.</p>
+            }
+            @foreach (var m in _members)
+            {
+                <a class="search-row" href="members">
+                    <span class="search-row-main">@m.FullName</span>
+                    <span class="search-row-sub">@(m.PhoneNumber ?? m.Email) · Hạng @m.MembershipTier · ₫ @m.WalletBalance.ToString("N0")</span>
+                </a>
+            }
+        </section>
+
+        <section class="dl-panel">
+            <h2><Icon Name="diamond" Size="20" /> Cơ (@_cues.Count)</h2>
+            @if (_cues.Count == 0)
+            {
+                <p class="page-empty">Không có cơ phù hợp.</p>
+            }
+            @foreach (var c in _cues)
+            {
+                <a class="search-row" href="cues/manage">
+                    <span class="search-row-main">@c.Name</span>
+                    <span class="search-row-sub">
+                        @(c.Brand ?? "—") ·
+                        @(c.IsForSale ? $"Bán ₫ {(c.SalePrice ?? 0):N0}" : $"Thuê ₫ {c.PricePerHour:N0}/h")
+                    </span>
+                </a>
+            }
+        </section>
+
+        <section class="dl-panel">
+            <h2><Icon Name="badge" Size="20" /> Nhân viên (@_staff.Count)</h2>
+            @if (_staff.Count == 0)
+            {
+                <p class="page-empty">Không có nhân viên phù hợp.</p>
+            }
+            @foreach (var s in _staff)
+            {
+                <a class="search-row" href="staff/manage">
+                    <span class="search-row-main">@s.FullName</span>
+                    <span class="search-row-sub">@(s.EmployeeCode ?? "—") · @(s.PhoneNumber ?? s.Email)</span>
+                </a>
+            }
+        </section>
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? Q { get; set; }
+
+    private bool _loading = true;
+    private List<TableDto> _tables = new();
+    private List<MemberInfoDto> _members = new();
+    private List<CueDto> _cues = new();
+    private List<StaffAccountDto> _staff = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        if (!AuthState.IsAdmin || string.IsNullOrWhiteSpace(Q))
+        {
+            _loading = false;
+            return;
+        }
+
+        var q = Q.Trim();
+        bool Has(string? s) => !string.IsNullOrEmpty(s) && s.Contains(q, StringComparison.OrdinalIgnoreCase);
+
+        _tables = (await TableApiService.GetTablesAsync())
+            .Where(t => Has(t.Name) || Has(t.TableTypeName)).ToList();
+        _members = (await WalletApiService.GetMembersAsync())
+            .Where(m => Has(m.FullName) || Has(m.Email) || Has(m.PhoneNumber)).ToList();
+        _cues = (await CueApiService.GetCuesAsync())
+            .Where(c => Has(c.Name) || Has(c.Brand) || Has(c.Category)).ToList();
+        _staff = (await AccountApiService.GetStaffListAsync())
+            .Where(s => Has(s.FullName) || Has(s.EmployeeCode) || Has(s.PhoneNumber) || Has(s.Email)).ToList();
+        _loading = false;
+    }
+}

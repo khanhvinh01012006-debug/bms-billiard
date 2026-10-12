@@ -1,0 +1,223 @@
+@page "/tables"
+@rendermode InteractiveServer
+@inject TableApiService TableApiService
+@inject IConfiguration Configuration
+@inject AuthState AuthState
+@implements IAsyncDisposable
+@using Microsoft.AspNetCore.SignalR.Client
+
+@* Kiến trúc: các thao tác vận hành (Nhận bàn/Trả bàn) nằm ở BMS.PlayerWeb, nơi nhân viên
+   (Role = Staff) đăng nhập để trực ca. Trang này ở Admin Web chỉ xem trạng thái bàn.
+   Đợt 16: bố cục ĐÚNG Stitch Dark Luxury "Quản lý bàn chơi Live" (qu_n_l_b_n_ch_i_live_s_bida
+   _desktop): khối "Sơ đồ tác chiến" có 4 chỉ số + cơ cấu trạng thái, thanh lọc theo khu
+   (loại bàn) + trạng thái, lưới card 3 cột. *@
+
+@if (!AuthState.IsAdmin)
+{
+    <h1>Quản lý Bàn chơi</h1>
+    <p class="page-empty">Bạn cần đăng nhập bằng tài khoản Admin để xem trang này.</p>
+}
+else
+{
+    var occupied = _tables.Count(t => t.Status == BMS.Shared.Dtos.TableStatus.Occupied);
+    var reserved = _tables.Count(t => t.Status == BMS.Shared.Dtos.TableStatus.Reserved);
+    var free = _tables.Count(t => t.Status == BMS.Shared.Dtos.TableStatus.Available);
+    var maint = _tables.Count(t => t.Status == BMS.Shared.Dtos.TableStatus.Maintenance);
+    var running = _tables
+        .Where(t => t.Status == BMS.Shared.Dtos.TableStatus.Occupied && t.ActiveSessionStartedAtUtc is not null)
+        .Sum(t => BMS.Shared.TablePricing.HourlyAmount(t.ActiveSessionStartedAtUtc!.Value, t.PausedAtUtc ?? _now,
+            Array.Empty<BMS.Shared.TablePricing.Slot>(), t.PricePerHour));
+    // Bàn "đang chơi" nhưng đã trả bàn chờ thanh toán không còn giờ bắt đầu phiên -> có thể
+    // rỗng; DefaultIfEmpty tránh lỗi "Sequence contains no elements" làm sập cả phiên Blazor.
+    var avgMinutes = _tables
+        .Where(t => t.Status == BMS.Shared.Dtos.TableStatus.Occupied && t.ActiveSessionStartedAtUtc is not null)
+        .Select(t => Math.Max(0, ((t.PausedAtUtc ?? _now) - t.ActiveSessionStartedAtUtc!.Value).TotalMinutes))
+        .DefaultIfEmpty(0)
+        .Average();
+    var fillPct = _tables.Count == 0 ? 0 : occupied * 100.0 / _tables.Count;
+    var zones = _tables.Select(t => t.TableTypeName).Where(n => !string.IsNullOrWhiteSpace(n)).Distinct().OrderBy(n => n).ToList();
+
+    <div class="dl-page">
+        <div class="dl-ops-top">
+            <section class="dl-ops-card">
+                <div class="dl-ops-head">
+                    <span class="kpi-icon-box"><Icon Name="sports_score" Size="24" Class="text-amber" /></span>
+                    <div>
+                        <div class="dl-ops-title-row">
+                            <h1 class="dl-ops-title">Sơ đồ tác chiến Floor Operations</h1>
+                            <span class="dl-live-badge">LIVE SYNC</span>
+                        </div>
+                        <p class="dl-body-sm">Giám sát hiệu suất bàn theo thời gian thực - cập nhật qua SignalR khi nhân viên nhận/trả bàn</p>
+                    </div>
+                </div>
+                <div class="dl-ops-buttons">
+                    <a class="btn btn-surface" href="table-types/manage"><Icon Name="grid_view" Size="18" />Loại bàn &amp; giá</a>
+                    <a class="btn btn-surface" href="payments"><Icon Name="receipt_long" Size="18" />Hóa đơn</a>
+                    <a class="btn btn-primary" href="tables/manage"><Icon Name="add_circle" Size="18" />Thêm bàn mới</a>
+                </div>
+                <div class="dl-ops-stats">
+                    <div>
+                        <span class="dl-meta-label">Bàn đang chơi</span>
+                        <div class="dl-ops-num">@occupied <span class="dl-ops-num-sub text-mint">/ @_tables.Count bàn</span></div>
+                    </div>
+                    <div>
+                        <span class="dl-meta-label">Tạm tính giờ chơi</span>
+                        <div class="dl-ops-num text-amber"><span class="dl-ops-cur">₫</span>@running.ToString("N0")</div>
+                    </div>
+                    <div>
+                        <span class="dl-meta-label">Thời lượng TB</span>
+                        <div class="dl-ops-num">@((int)(avgMinutes / 60))h <span class="dl-ops-num">@(((int)avgMinutes % 60).ToString("00"))m</span></div>
+                    </div>
+                    <div>
+                        <span class="dl-meta-label">Hiệu suất vận hành</span>
+                        <div class="dl-ops-num text-mint">@fillPct.ToString("0.#")% <span class="dl-ops-num-sub">@occupied/@_tables.Count bàn</span></div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="dl-ops-card dl-ops-mix">
+                <div class="dl-panel-head">
+                    <div class="dl-ops-mix-title"><Icon Name="bar_chart" Size="20" Class="text-amber" /> Cơ cấu trạng thái bàn</div>
+                    <span class="dl-feed-count">Hiện tại</span>
+                </div>
+                <div class="dl-donut-wrap">
+                    <div class="dl-donut" style="--p:@fillPct.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)">
+                        <div class="dl-donut-inner">
+                            <span class="dl-donut-num">@_tables.Count</span>
+                            <span class="dl-donut-label">Tổng bàn</span>
+                        </div>
+                    </div>
+                    <ul class="dl-donut-legend">
+                        <li><span class="dl-dot dl-dot-live"></span>Đang chơi <strong>@occupied</strong></li>
+                        <li><span class="dl-dot dl-dot-reserved"></span>Đã đặt <strong>@reserved</strong></li>
+                        <li><span class="dl-dot dl-dot-free"></span>Bàn trống <strong>@free</strong></li>
+                        <li><span class="dl-dot dl-dot-off"></span>Bảo trì <strong>@maint</strong></li>
+                    </ul>
+                </div>
+            </section>
+        </div>
+
+        <section class="dl-filter-card">
+            <div class="dl-zone-tabs">
+                <button class="@ZoneClass(null)" @onclick="() => _zone = null">Tất cả (@_tables.Count bàn)</button>
+                @foreach (var z in zones)
+                {
+                    <button class="@ZoneClass(z)" @onclick="() => _zone = z">@z (@_tables.Count(t => t.TableTypeName == z) bàn)</button>
+                }
+            </div>
+            <div class="dl-status-filter">
+                <span class="dl-meta-label">Trạng thái:</span>
+                <button class="@StatusClass(BMS.Shared.Dtos.TableStatus.Occupied, "live")" @onclick="() => ToggleStatus(BMS.Shared.Dtos.TableStatus.Occupied)"><span class="dl-dot dl-dot-live"></span>Đang hoạt động (@occupied)</button>
+                <button class="@StatusClass(BMS.Shared.Dtos.TableStatus.Available, "free")" @onclick="() => ToggleStatus(BMS.Shared.Dtos.TableStatus.Available)"><span class="dl-dot dl-dot-free"></span>Bàn trống (@free)</button>
+                <button class="@StatusClass(BMS.Shared.Dtos.TableStatus.Reserved, "reserved")" @onclick="() => ToggleStatus(BMS.Shared.Dtos.TableStatus.Reserved)"><span class="dl-dot dl-dot-reserved"></span>Đã đặt chỗ (@reserved)</button>
+                <button class="@StatusClass(BMS.Shared.Dtos.TableStatus.Maintenance, "off")" @onclick="() => ToggleStatus(BMS.Shared.Dtos.TableStatus.Maintenance)"><span class="dl-dot dl-dot-off"></span>Bảo trì (@maint)</button>
+            </div>
+        </section>
+
+        @if (_loading)
+        {
+            <p class="hint-text">Đang tải...</p>
+        }
+        else
+        {
+            <div class="dl-table-grid dl-table-grid-3">
+                @foreach (var table in _tables.Where(t => (_zone is null || t.TableTypeName == _zone) && (_status is null || t.Status == _status)))
+                {
+                    <AdminTableCard Table="table" Now="_now" />
+                }
+            </div>
+        }
+
+        <section class="dl-footer-bar">
+            <span class="dl-footer-item"><span class="dl-dot dl-dot-live"></span>Hệ thống vận hành bàn trực tiếp</span>
+            <span class="dl-footer-item"><Icon Name="info" Size="16" /> Nhận bàn/Trả bàn do nhân viên trực thực hiện trên ứng dụng Nhân viên (BMS.PlayerWeb).</span>
+        </section>
+    </div>
+}
+
+@code {
+    private List<TableDto> _tables = new();
+    private bool _loading = true;
+    private HubConnection? _hubConnection;
+    private DateTime _now = DateTime.UtcNow;
+    private System.Threading.Timer? _clock;
+    private string? _zone;
+    private BMS.Shared.Dtos.TableStatus? _status;
+
+    private string ZoneClass(string? zone) => _zone == zone ? "dl-zone dl-zone-active" : "dl-zone";
+
+    private string StatusClass(BMS.Shared.Dtos.TableStatus status, string tone) =>
+        _status == status ? $"dl-status-chip dl-status-chip-{tone} is-active" : $"dl-status-chip dl-status-chip-{tone}";
+
+    private void ToggleStatus(BMS.Shared.Dtos.TableStatus status) => _status = _status == status ? null : status;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsAdmin)
+        {
+            return;
+        }
+
+        await LoadTablesAsync();
+
+        // Đồng hồ "Thời gian bật bàn" chạy theo giây như Stitch.
+        _clock = new System.Threading.Timer(_ =>
+        {
+            _now = DateTime.UtcNow;
+            _ = InvokeAsync(StateHasChanged);
+        }, null, 1000, 1000);
+
+        var apiBaseUrl = Configuration["Api:BaseUrl"] ?? "https://localhost:5001";
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl($"{apiBaseUrl}/hubs/bms")
+            .WithAutomaticReconnect(new ForeverRetryPolicy())
+            .Build();
+
+        // Mất kết nối rồi tự nối lại: tải lại dữ liệu vì các sự kiện phát ra lúc mất mạng đã bị lỡ.
+        _hubConnection.Reconnected += async _ =>
+        {
+            await LoadTablesAsync();
+            await InvokeAsync(StateHasChanged);
+        };
+
+        _hubConnection.On<TableStatusChangedEvent>("TableStatusChanged", async _ =>
+        {
+            await LoadTablesAsync();
+            await InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            await _hubConnection.StartAsync();
+        }
+        catch
+        {
+            // If the hub isn't reachable yet, the page still works via manual refresh.
+        }
+    }
+
+    private async Task LoadTablesAsync()
+    {
+        _loading = true;
+        _tables = await TableApiService.GetTablesAsync();
+        _loading = false;
+    }
+
+    private static string StatusLabel(BMS.Shared.Dtos.TableStatus status) => status switch
+    {
+        BMS.Shared.Dtos.TableStatus.Available => "Trống",
+        BMS.Shared.Dtos.TableStatus.Occupied => "Đang chơi",
+        BMS.Shared.Dtos.TableStatus.Reserved => "Đã đặt",
+        BMS.Shared.Dtos.TableStatus.Maintenance => "Bảo trì",
+        _ => status.ToString()
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        _clock?.Dispose();
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
+}

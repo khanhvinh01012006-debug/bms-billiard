@@ -1,0 +1,197 @@
+@page "/staff/manage"
+@rendermode InteractiveServer
+@inject AccountApiService AccountApiService
+@inject AuthState AuthState
+
+<h1><Icon Name="users" Size="22" /> Quản lý nhân viên</h1>
+
+@if (!AuthState.IsAdmin)
+{
+    <p class="error-text">Chỉ Quản trị viên mới có quyền truy cập trang này.</p>
+}
+else
+{
+    <div class="section form-section manage-stack">
+        <h2>Thêm nhân viên mới</h2>
+        <div class="card form-card">
+            <EditForm Model="_model" OnValidSubmit="HandleCreate">
+                <div class="form-field">
+                    <label for="fullName">Họ và tên</label>
+                    <input id="fullName" class="input" @bind="_model.FullName" placeholder="Nguyễn Văn A" />
+                </div>
+                <div class="form-field">
+                    <label for="phone">Số điện thoại (tùy chọn)</label>
+                    <input id="phone" class="input" @bind="_model.PhoneNumber" placeholder="09xx xxx xxx" />
+                </div>
+                <div class="form-field">
+                    <label for="pin">Mã PIN (4-6 chữ số)</label>
+                    <input id="pin" type="password" inputmode="numeric" class="input" @bind="_model.Pin" placeholder="Ví dụ: 2468" />
+                </div>
+                <div class="form-field">
+                    <label for="employeeCode">Mã nhân viên (tùy chọn, để trống để hệ thống tự tạo)</label>
+                    <input id="employeeCode" class="input" @bind="_model.EmployeeCode" placeholder="VD: NV0001" />
+                </div>
+
+                @if (!string.IsNullOrEmpty(_error))
+                {
+                    <p class="error-text">@_error</p>
+                }
+                @if (!string.IsNullOrEmpty(_message))
+                {
+                    <p class="hint-text">@_message</p>
+                }
+
+                <button type="submit" class="btn btn-primary" disabled="@_busy">
+                    @(_busy ? "Đang tạo..." : "Tạo tài khoản nhân viên")
+                </button>
+            </EditForm>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Danh sách nhân viên</h2>
+        @if (_loading)
+        {
+            <p>Đang tải...</p>
+        }
+        else if (_staff.Count == 0)
+        {
+            <p class="page-empty">Chưa có nhân viên nào.</p>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Họ và tên</th>
+                        <th>Mã nhân viên</th>
+                        <th>Số điện thoại</th>
+                        <th>Ngày tạo</th>
+                        <th>Hạn mức giảm giá %</th>
+                        <th>Lương/giờ (đ)</th>
+                        <th>Xử lý</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var s in _staff)
+                    {
+                        <tr>
+                            <td>@s.FullName</td>
+                            <td>@(s.EmployeeCode ?? "-")</td>
+                            <td>@(s.PhoneNumber ?? "-")</td>
+                            <td>@s.CreatedAtUtc.ToLocalTime().ToString("HH:mm dd/MM/yyyy")</td>
+                            <td><input class="input input-sm" style="width:5rem;" type="number" min="0" max="100" @bind="_discountLimitById[s.Id]" /></td>
+                            <td><input class="input input-sm" style="width:7rem;" type="number" min="0" @bind="_wageRateById[s.Id]" /></td>
+                            <td><button class="btn btn-ghost btn-sm" @onclick="() => SaveStaffSettings(s.Id)">Lưu</button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            @if (!string.IsNullOrEmpty(_settingsMessage))
+            {
+                <p class="hint-text">@_settingsMessage</p>
+            }
+        }
+    </div>
+}
+
+@code {
+    private CreateStaffModel _model = new();
+    private List<BMS.Shared.Dtos.StaffAccountDto> _staff = new();
+    private string? _error;
+    private string? _message;
+    private bool _busy;
+    private bool _loading = true;
+
+    // Đợt 9: hạn mức giảm giá % + lương/giờ - Dictionary theo staff Id, seed trước khi @bind.
+    private readonly Dictionary<int, decimal?> _discountLimitById = new();
+    private readonly Dictionary<int, decimal?> _wageRateById = new();
+    private string? _settingsMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState.IsAdmin)
+        {
+            await LoadStaffAsync();
+        }
+    }
+
+    private async Task LoadStaffAsync()
+    {
+        _loading = true;
+        try
+        {
+            _staff = await AccountApiService.GetStaffListAsync();
+            foreach (var s in _staff)
+            {
+                _discountLimitById[s.Id] = s.DiscountLimitPercent;
+                _wageRateById[s.Id] = s.WageRatePerHour;
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SaveStaffSettings(int staffId)
+    {
+        var discountLimit = _discountLimitById.TryGetValue(staffId, out var d) ? d : null;
+        var wageRate = _wageRateById.TryGetValue(staffId, out var w) ? w : null;
+
+        var (success, error) = await AccountApiService.UpdateStaffSettingsAsync(staffId, discountLimit, wageRate);
+        _settingsMessage = success ? "Đã lưu cài đặt nhân viên." : error;
+    }
+
+    private async Task HandleCreate()
+    {
+        if (string.IsNullOrWhiteSpace(_model.FullName))
+        {
+            _error = "Vui lòng nhập họ và tên.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_model.Pin) || !System.Text.RegularExpressions.Regex.IsMatch(_model.Pin, "^\\d{4,6}$"))
+        {
+            _error = "Mã PIN phải gồm 4-6 chữ số.";
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        _message = null;
+
+        try
+        {
+            var (success, result, error) = await AccountApiService.CreateStaffAsync(
+                _model.FullName, _model.Pin, _model.PhoneNumber, _model.EmployeeCode);
+
+            if (success && result is not null)
+            {
+                _message = $"Đã tạo tài khoản. Mã nhân viên: {result.EmployeeCode} - cung cấp mã này và PIN vừa nhập cho nhân viên để họ đăng nhập.";
+                _model = new CreateStaffModel();
+                await LoadStaffAsync();
+            }
+            else
+            {
+                _error = error ?? "Tạo tài khoản thất bại.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Không thể kết nối tới máy chủ: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private class CreateStaffModel
+    {
+        public string FullName { get; set; } = string.Empty;
+        public string? PhoneNumber { get; set; }
+        public string Pin { get; set; } = string.Empty;
+        public string? EmployeeCode { get; set; }
+    }
+}

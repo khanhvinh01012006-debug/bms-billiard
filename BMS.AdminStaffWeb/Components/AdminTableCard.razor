@@ -1,0 +1,127 @@
+@* Đợt 16: card bàn ĐÚNG mẫu Stitch Dark Luxury ("Sơ Đồ Bàn Chơi Trực Tiếp"):
+   tag loại bàn + tiêu đề serif + pill trạng thái, hộp số liệu (thời gian bật bàn / tạm
+   tính hoặc đơn giá), 2 dòng thông tin, thanh thao tác ở đáy. Trang Live chỉ để xem
+   (nhận/trả bàn làm ở màn hình Vận hành /ops) nên thanh thao tác dẫn tới trang quản lý. *@
+
+<div class="dl-table-card status-@Table.Status.ToString().ToLowerInvariant()">
+    <div class="dl-table-body">
+        <div class="tcard-felt" aria-hidden="true">
+            @if (Table.Status != TableStatus.Available)
+            {
+                <span class="tcard-felt-label">@StatusText</span>
+            }
+        </div>
+        <div class="dl-table-head">
+            <div class="dl-table-title-wrap">
+                <div class="dl-table-tags">
+                    <span class="dl-tag @(IsVip ? "dl-tag-vip" : "")">@(Table.TableTypeName ?? "Chưa phân loại")</span>
+                    <span class="dl-table-cap">@Table.Capacity người</span>
+                </div>
+                <h4 class="dl-table-name">@Table.Name</h4>
+            </div>
+            @switch (Table.Status)
+            {
+                case TableStatus.Occupied:
+                    <span class="dl-status dl-status-live"><span class="dl-status-dot"></span>Đang chơi</span>
+                    break;
+                case TableStatus.Reserved:
+                    <span class="dl-status dl-status-reserved"><Icon Name="event_available" Size="14" />Đã đặt</span>
+                    break;
+                case TableStatus.Maintenance:
+                    <span class="dl-status dl-status-maint"><Icon Name="build" Size="14" />Bảo trì</span>
+                    break;
+                default:
+                    <span class="dl-status dl-status-free"><span class="dl-status-dot"></span>Bàn trống</span>
+                    break;
+            }
+        </div>
+
+        <div class="dl-meta-box">
+            @if (Table.Status == TableStatus.Occupied && Table.ActiveSessionStartedAtUtc is not null)
+            {
+                var clockNow = Table.PausedAtUtc ?? Now;
+                var elapsed = clockNow - Table.ActiveSessionStartedAtUtc.Value;
+                if (elapsed < TimeSpan.Zero) { elapsed = TimeSpan.Zero; }
+                var running = BMS.Shared.TablePricing.HourlyAmount(Table.ActiveSessionStartedAtUtc.Value, clockNow,
+                    Array.Empty<BMS.Shared.TablePricing.Slot>(), Table.PricePerHour);
+                <div>
+                    <span class="dl-meta-label">@(Table.PausedAtUtc is not null ? "Đang tạm dừng" : "Thời gian bật bàn")</span>
+                    <div class="dl-meta-value text-mint"><Icon Name="timer" Size="18" />@(((int)elapsed.TotalHours).ToString("00")):@elapsed.ToString(@"mm\:ss")</div>
+                </div>
+                <div class="dl-meta-right">
+                    <span class="dl-meta-label">Tạm tính giờ chơi</span>
+                    <div class="dl-meta-value text-amber">₫ @running.ToString("N0")</div>
+                </div>
+            }
+            else
+            {
+                <div>
+                    <span class="dl-meta-label">Trạng thái kỹ thuật</span>
+                    <div class="dl-meta-value dl-meta-plain">
+                        @if (Table.Status == TableStatus.Maintenance)
+                        {
+                            <Icon Name="build" Size="18" Class="text-error" /> <span>Đang bảo trì</span>
+                        }
+                        else if (Table.Status == TableStatus.Occupied)
+                        {
+                            <Icon Name="receipt_long" Size="18" Class="text-amber" /> <span>Chờ thanh toán</span>
+                        }
+                        else if (Table.Status == TableStatus.Reserved)
+                        {
+                            <Icon Name="event_available" Size="18" Class="text-amber" /> <span>Khách đã đặt trước</span>
+                        }
+                        else
+                        {
+                            <Icon Name="check_circle" Size="18" Class="text-mint" /> <span>Sẵn sàng phục vụ</span>
+                        }
+                    </div>
+                </div>
+                <div class="dl-meta-right">
+                    <span class="dl-meta-label">Đơn giá giờ chơi</span>
+                    <div class="dl-meta-value text-amber">₫ @Table.PricePerHour.ToString("N0")/h</div>
+                </div>
+            }
+        </div>
+
+        <div class="dl-rows">
+            <div class="dl-row"><span>Loại bàn:</span><span>@(Table.TableTypeName ?? "—")</span></div>
+            <div class="dl-row">
+                <span>@(Table.Status == TableStatus.Occupied ? "Bắt đầu lúc:" : "Đơn giá:")</span>
+                <span>
+                    @if (Table.Status == TableStatus.Occupied && Table.ActiveSessionStartedAtUtc is not null)
+                    {
+                        @Table.ActiveSessionStartedAtUtc.Value.ToLocalTime().ToString("HH:mm dd/MM")
+                    }
+                    else
+                    {
+                        @($"₫ {Table.PricePerHour:N0} / giờ")
+                    }
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <div class="dl-table-actions">
+        <a class="dl-action" href="tables/manage"><Icon Name="edit" Size="16" Class="text-amber" />Sửa bàn</a>
+        <a class="dl-action" href="table-types/manage"><Icon Name="payments" Size="16" Class="text-muted" />Giá theo giờ</a>
+        <a class="dl-action dl-action-primary" href="payments"><Icon Name="receipt_long" Size="16" />Hóa đơn</a>
+    </div>
+</div>
+
+@code {
+    private string StatusText => Table.Status switch
+    {
+        TableStatus.Occupied => "Đang chơi",
+        TableStatus.Reserved => "Đã đặt",
+        TableStatus.Maintenance => "Bảo trì",
+        _ => "Bàn trống"
+    };
+
+    [Parameter, EditorRequired] public TableDto Table { get; set; } = default!;
+
+    /// <summary>Thời điểm hiện tại (UTC) - truyền từ trang cha để đồng hồ chạy theo giây.</summary>
+    [Parameter] public DateTime Now { get; set; } = DateTime.UtcNow;
+
+    private bool IsVip =>
+        Table.TableTypeName?.Contains("VIP", StringComparison.OrdinalIgnoreCase) == true;
+}

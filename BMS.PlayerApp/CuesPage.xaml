@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="BMS.PlayerApp.CuesPage"
+             Title="Thuê cơ">
+
+    <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto" Padding="16" RowSpacing="10">
+
+        <Label Grid.Row="0" Text="Thuê cơ" FontSize="22" FontAttributes="Bold" TextColor="{StaticResource FeltDark}" />
+
+        <Label Grid.Row="1" x:Name="StaffLabel" FontSize="12" TextColor="{StaticResource FeltLight}" IsVisible="False"
+               Text="Chế độ nhân viên: kéo xuống để làm mới danh sách đang thuê." />
+
+        <Entry Grid.Row="2" x:Name="CustomerNameEntry" Placeholder="Nhập tên của bạn" />
+
+        <RefreshView Grid.Row="4" x:Name="CuesRefreshView" Refreshing="OnRefreshing">
+            <CollectionView x:Name="CuesCollectionView">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <Frame Margin="0,4">
+                            <VerticalStackLayout Spacing="4">
+                                <Label Text="{Binding Name}" FontAttributes="Bold" FontSize="16" />
+                                <Label Text="{Binding AvailableLabel}" TextColor="{StaticResource FeltLight}" />
+                                <Label Text="{Binding PriceLabel}" FontSize="12" />
+                                <Button Text="Thuê ngay"
+                                        IsEnabled="{Binding CanRent}"
+                                        Clicked="OnRentClicked"
+                                        CommandParameter="{Binding Id}" />
+                            </VerticalStackLayout>
+                        </Frame>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+        </RefreshView>
+
+        <VerticalStackLayout Grid.Row="5" x:Name="StaffRentalsSection" IsVisible="False" Spacing="6">
+            <Label Text="Đang thuê (nhân viên)" FontAttributes="Bold" FontSize="16" TextColor="{StaticResource FeltDark}" />
+            <CollectionView x:Name="ActiveRentalsCollectionView" HeightRequest="240">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <Frame Margin="0,4">
+                            <VerticalStackLayout Spacing="4">
+                                <Label Text="{Binding CueName}" FontAttributes="Bold" />
+                                <Label Text="{Binding CustomerName}" FontSize="12" />
+                                <HorizontalStackLayout Spacing="8">
+                                    <Button Text="Trả cơ" Clicked="OnReturnOkClicked" CommandParameter="{Binding Id}" />
+                                    <Button Text="Hư hỏng" Clicked="OnReturnDamagedClicked" CommandParameter="{Binding Id}" />
+                                    <Button Text="Mất cơ" Clicked="OnReturnLostClicked" CommandParameter="{Binding Id}" />
+                                </HorizontalStackLayout>
+                            </VerticalStackLayout>
+                        </Frame>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+        </VerticalStackLayout>
+    </Grid>
+
+</ContentPage>

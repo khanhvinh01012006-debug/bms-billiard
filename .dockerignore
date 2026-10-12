@@ -1,0 +1,16 @@
+**/bin/
+**/obj/
+**/.vs/
+**/*.user
+**/node_modules/
+.env
+data/
+backups/
+BMS.PlayerApp/
+BMS.API/bms.db*
+**/bms.db-wal
+**/bms.db-shm
+BMS.API/wwwroot/uploads/
+*.docx
+**/App_Data/
+dist/

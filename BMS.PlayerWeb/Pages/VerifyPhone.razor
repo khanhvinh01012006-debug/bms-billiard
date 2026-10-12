@@ -1,0 +1,102 @@
+@page "/verify-phone"
+@inject AccountApiService AccountApiService
+@inject AuthState AuthState
+@inject NavigationManager NavigationManager
+
+<h1>Xác thực số điện thoại</h1>
+
+@if (!AuthState.IsAuthenticated)
+{
+    <p class="hint-text">Đang chuyển tới trang đăng nhập...</p>
+}
+else
+{
+    <div class="login-form-card">
+        <div class="form-field">
+            <label>Số điện thoại</label>
+            <input class="input" @bind="_phone" placeholder="09xxxxxxxx" />
+        </div>
+        <button class="btn btn-primary btn-block" @onclick="SendOtp" disabled="@_sending">
+            @(_sending ? "Đang gửi..." : "Gửi mã OTP")
+        </button>
+
+        @if (!string.IsNullOrEmpty(_otpInfo))
+        {
+            <p class="hint-text">@_otpInfo</p>
+        }
+
+        <div class="form-field" style="margin-top:1rem;">
+            <label>Mã OTP</label>
+            <input class="input" @bind="_otp" placeholder="6 chữ số" />
+        </div>
+        <button class="btn btn-primary btn-block" @onclick="VerifyOtp" disabled="@_verifying">
+            @(_verifying ? "Đang xác thực..." : "Xác thực")
+        </button>
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <p class="error-text">@_error</p>
+        }
+        @if (_verified)
+        {
+            <p class="hint-text">Xác thực số điện thoại thành công! <a href="profile">Quay lại hồ sơ</a></p>
+        }
+    </div>
+}
+
+@code {
+    private string _phone = string.Empty;
+    private string _otp = string.Empty;
+    private string? _otpInfo;
+    private string? _error;
+    private bool _sending;
+    private bool _verifying;
+    private bool _verified;
+
+    protected override void OnInitialized()
+    {
+        if (!AuthState.IsAuthenticated)
+        {
+            NavigationManager.NavigateTo("/login");
+        }
+    }
+
+    private async Task SendOtp()
+    {
+        _sending = true;
+        _error = null;
+        _otpInfo = null;
+
+        var (success, result, error) = await AccountApiService.SendPhoneOtpAsync(_phone);
+        _sending = false;
+
+        if (success && result is not null)
+        {
+            _otpInfo = string.IsNullOrEmpty(result.DebugOtp)
+                ? result.Message
+                : $"{result.Message}\nMã (chế độ demo): {result.DebugOtp}";
+        }
+        else
+        {
+            _error = error ?? "Gửi mã OTP thất bại.";
+        }
+    }
+
+    private async Task VerifyOtp()
+    {
+        _verifying = true;
+        _error = null;
+
+        var (success, error) = await AccountApiService.VerifyPhoneOtpAsync(_otp);
+        _verifying = false;
+
+        if (success)
+        {
+            _verified = true;
+        }
+        else
+        {
+            _error = error ?? "Xác thực OTP thất bại.";
+        }
+    }
+}

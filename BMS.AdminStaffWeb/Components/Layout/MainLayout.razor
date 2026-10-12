@@ -1,0 +1,240 @@
+@inherits LayoutComponentBase
+@inject AuthState AuthState
+@inject TableApiService TableApiService
+@inject WalletApiService WalletApiService
+@inject NavigationManager NavigationManager
+@inject StaffNotificationService StaffNotifications
+@implements IDisposable
+
+@* Khung trang cổng nhân viên: thanh bên 240px + header (ô tìm kiếm, chip số liệu, khối
+   người dùng) + nội dung. Màn hình < 1024px: header gọn có logo + thanh điều hướng dưới
+   (NavMenu). Trang quản lý "nặng" của Admin chỉ xem trên điện thoại. *@
+
+<div class="app-shell">
+    <NavMenu OccupiedCount="_occupied" TotalTables="_totalTables" PendingTopUps="_pendingTopUps" TodayRevenue="_todayRevenue" />
+    <div class="app-main">
+        <header class="admin-header">
+            <div class="admin-header-left">
+                <a class="admin-mobile-brand" href="@(AuthState.IsAdmin ? "dashboard" : AuthState.IsStaff ? "ops" : "login")">
+                    <img src="images/logo-mark.svg" width="28" height="28" alt="" />
+                    <span>BMS Billiard</span>
+                </a>
+                @if (AuthState.IsAdmin)
+                {
+                    <form class="admin-search" @onsubmit="Search" @onsubmit:preventDefault="true">
+                        <Icon Name="search" Size="20" Class="admin-search-icon" />
+                        <input class="admin-search-input" placeholder="Tìm bàn, hội viên, cơ, nhân viên..." @bind="_query" @bind:event="oninput" />
+                    </form>
+                }
+                @if (AuthState.IsAdmin)
+                {
+                    <div class="admin-header-chips">
+                        <span class="admin-chip">
+                            <Icon Name="pool" Size="18" Class="text-mint" />
+                            Bàn Live: <strong class="text-mint">@_occupied</strong>
+                        </span>
+                        <span class="admin-chip">
+                            <Icon Name="lock_clock" Size="18" Class="text-amber" />
+                            Chờ duyệt: <strong class="text-amber">@_pendingTopUps lệnh</strong>
+                        </span>
+                    </div>
+                }
+            </div>
+            <div class="admin-header-right">
+                @if (AuthState.IsAdmin)
+                {
+                    <div class="admin-wallet">
+                        <Icon Name="account_balance_wallet" Size="20" Class="text-amber" />
+                        <div class="admin-wallet-text">
+                            <span class="admin-wallet-label">Doanh thu hôm nay</span>
+                            <span class="admin-wallet-value">₫ @_todayRevenue.ToString("N0")</span>
+                        </div>
+                    </div>
+                    <a class="admin-bell" href="topups" title="Yêu cầu nạp tiền chờ duyệt">
+                        <Icon Name="notifications" Size="22" />
+                        @if (_pendingTopUps > 0)
+                        {
+                            <span class="admin-bell-dot"></span>
+                        }
+                    </a>
+                }
+                @if (AuthState.IsStaffOrAdmin)
+                {
+                    <div class="account-menu">
+                        <button type="button" class="admin-user account-menu-trigger" @onclick="ToggleAccountMenu"
+                                aria-haspopup="menu" aria-expanded="@(_accountMenuOpen ? "true" : "false")" title="@AuthState.FullName">
+                            <span class="admin-avatar">@Initial</span>
+                            <span class="admin-user-text">
+                                <span class="admin-user-name">@AuthState.FullName</span>
+                                <span class="admin-user-role">@RoleLabel</span>
+                            </span>
+                            <Icon Name="expand_more" Size="18" Class="account-menu-caret" />
+                        </button>
+                        @if (_accountMenuOpen)
+                        {
+                            <div class="account-menu-backdrop" @onclick="CloseAccountMenu"></div>
+                            <div class="account-menu-panel" role="menu">
+                                <div class="account-menu-head">
+                                    <span class="account-menu-name">@AuthState.FullName</span>
+                                    <span class="account-menu-role">@RoleLabel</span>
+                                </div>
+                                <a class="account-menu-item" href="profile" role="menuitem" @onclick="CloseAccountMenu">
+                                    <Icon Name="user" Size="18" /> Hồ sơ cá nhân
+                                </a>
+                                <button type="button" class="account-menu-item account-menu-logout" role="menuitem" @onclick="SignOut">
+                                    <Icon Name="logout" Size="18" /> Đăng xuất
+                                </button>
+                            </div>
+                        }
+                    </div>
+                }
+                else if (!IsLoginPage)
+                {
+                    <a class="btn btn-primary btn-sm" href="login">Đăng nhập</a>
+                }
+            </div>
+        </header>
+        <div class="app-content @(IsHeavyPage ? "page-heavy" : "")">
+            @if (IsHeavyPage && AuthState.IsAdmin)
+            {
+                <p class="desktop-only-notice" role="note">
+                    <Icon Name="computer" Size="18" />
+                    <span>Trang quản lý này dùng đầy đủ trên máy tính. Trên điện thoại chỉ xem - vui lòng dùng máy tính để thêm, sửa hoặc xóa.</span>
+                </p>
+            }
+            @Body
+        </div>
+    </div>
+</div>
+
+@code {
+    private string _query = string.Empty;
+    private int _occupied;
+    private int _totalTables;
+    private int _pendingTopUps;
+    private decimal _todayRevenue;
+
+    // Trang cấu hình / nhân sự / báo cáo: trên điện thoại chỉ xem (ẩn form thêm-sửa và nút xóa).
+    private static readonly string[] HeavyPages =
+    {
+        "tables/manage", "table-types/manage", "cues/manage", "inventory/manage", "tournaments/manage",
+        "staff/manage", "members", "payments", "shifts", "attendance"
+    };
+
+    private bool IsHeavyPage
+    {
+        get
+        {
+            var path = NavigationManager.ToBaseRelativePath(NavigationManager.Uri).Split('?', '#')[0].TrimEnd('/');
+            return HeavyPages.Contains(path, StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    // Đang ở trang đăng nhập thì không hiện thêm nút "Đăng nhập" trên header.
+    private bool IsLoginPage => NavigationManager.ToBaseRelativePath(NavigationManager.Uri).Split('?', '#')[0].TrimEnd('/') is "" or "login";
+
+    private string RoleLabel => AuthState.IsAdmin ? "Quản trị viên" : "Nhân viên";
+
+    // Menu tài khoản (avatar góc trên phải): Hồ sơ / Đăng xuất. Thay cho khối "Đang đăng nhập /
+    // Đăng xuất" ở đáy thanh bên trước đây.
+    private bool _accountMenuOpen;
+
+    private void ToggleAccountMenu() => _accountMenuOpen = !_accountMenuOpen;
+
+    private void CloseAccountMenu() => _accountMenuOpen = false;
+
+    private void SignOut()
+    {
+        _accountMenuOpen = false;
+        AuthState.SignOut();
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        if (_accountMenuOpen)
+        {
+            _accountMenuOpen = false;
+            _ = InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private string Initial =>
+        string.IsNullOrWhiteSpace(AuthState.FullName)
+            ? "A"
+            : AuthState.FullName!.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries)[^1][..1].ToUpperInvariant();
+
+    protected override void OnInitialized()
+    {
+        AuthState.Changed += OnAuthChanged;
+        NavigationManager.LocationChanged += OnLocationChanged;
+    }
+
+    // Layout nhận Body mới mỗi lần chuyển trang -> làm mới số liệu header/sidebar.
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadSummaryAsync();
+    }
+
+    private async Task LoadSummaryAsync()
+    {
+        if (!AuthState.IsAdmin)
+        {
+            return;
+        }
+
+        try
+        {
+            var tables = await TableApiService.GetTablesAsync();
+            _totalTables = tables.Count;
+            _occupied = tables.Count(t => t.Status == TableStatus.Occupied);
+
+            var pending = await WalletApiService.GetPendingTransactionsAsync();
+            _pendingTopUps = pending.Count;
+
+            var payments = await WalletApiService.GetAllTransactionsAsync("Approved", null, "Payment");
+            _todayRevenue = payments
+                .Where(t => t.CreatedAtUtc.ToLocalTime().Date == DateTime.Now.Date)
+                .Sum(t => t.Amount);
+        }
+        catch
+        {
+            // API chưa sẵn sàng - header vẫn hiển thị, số liệu giữ giá trị cũ.
+        }
+    }
+
+    private void OnAuthChanged()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            // Đếm tin nhắn chưa đọc / yêu cầu nạp tiền chờ duyệt cho huy hiệu trên menu.
+            if (AuthState.IsStaffOrAdmin)
+            {
+                await StaffNotifications.StartAsync();
+            }
+            else
+            {
+                await StaffNotifications.StopAsync();
+            }
+
+            await LoadSummaryAsync();
+            StateHasChanged();
+        });
+    }
+
+    private void Search()
+    {
+        var q = _query.Trim();
+        if (q.Length == 0)
+        {
+            return;
+        }
+
+        NavigationManager.NavigateTo($"search?q={Uri.EscapeDataString(q)}");
+    }
+
+    public void Dispose()
+    {
+        AuthState.Changed -= OnAuthChanged;
+        NavigationManager.LocationChanged -= OnLocationChanged;
+    }
+}

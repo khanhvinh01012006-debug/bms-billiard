@@ -1,0 +1,266 @@
+@inherits LayoutComponentBase
+@inject AuthState AuthState
+@inject AuthStorageService AuthStorage
+@inject MyBookingsService MyBookings
+@implements IAsyncDisposable
+
+@* Đợt 16: khung trang theo ĐÚNG bố cục Stitch "tinh gọn":
+   - Desktop (>= 1024px): sidebar cố định bên trái (w-72, nền surface-container-lowest)
+     + header mỏng mờ (blur) ở trên + nội dung chiếm hết bề ngang còn lại.
+   - Mobile/tablet (< 1024px): header 1 hàng (logo + tài khoản) + thanh điều hướng dưới.
+   Chỉ đổi giao diện - toàn bộ logic đăng nhập/SignalR ở @code giữ nguyên. *@
+
+<div class="app-shell">
+    <aside class="side-nav">
+        <div class="side-nav-top">
+            <a class="side-brand" href="">
+                <img src="images/logo-mark.svg" class="brand-mark" width="32" height="32" alt="" />
+                <span class="side-brand-text">
+                    <span class="side-brand-name">BMS Billiard</span>
+                    <span class="side-brand-sub">Club &amp; Cue</span>
+                </span>
+            </a>
+
+            <nav class="side-links">
+                <NavLink class="side-link" href="" Match="NavLinkMatch.All">
+                    <Icon Name="grid" Size="20" /><span>Bàn chơi</span>
+                </NavLink>
+                <NavLink class="side-link" href="cues">
+                    <Icon Name="cue" Size="20" /><span>Thuê &amp; Mua Cơ</span>
+                </NavLink>
+                <NavLink class="side-link" href="tournaments">
+                    <Icon Name="trophy" Size="20" /><span>Giải đấu</span>
+                </NavLink>
+                <NavLink class="side-link" href="matches">
+                    <Icon Name="users" Size="20" /><span>Ghép trận</span>
+                </NavLink>
+                @if (AuthState.IsPlayer)
+                {
+                    <NavLink class="side-link" href="wallet">
+                        <Icon Name="wallet" Size="20" /><span>Ví của tôi</span>
+                    </NavLink>
+                }
+            </nav>
+        </div>
+
+        @* Tài khoản + Đăng xuất chỉ còn ở góc trên phải (menu của avatar) - không lặp ở đây. *@
+    </aside>
+
+    <div class="app-body">
+        <header class="topbar">
+            <a class="brand" href="">
+                <img src="images/logo-mark.svg" class="brand-mark" width="28" height="28" alt="" />
+                @* Stitch mobile: dòng nhỏ = thương hiệu, dòng lớn = tên màn hình hiện tại. *@
+                <span class="brand-text">
+                    <span class="brand-sub">BMS Billiard</span>
+                    <span class="brand-name">@PageTitle</span>
+                </span>
+            </a>
+
+            <form class="topbar-search" @onsubmit="Search" @onsubmit:preventDefault="true">
+                <Icon Name="search" Size="18" Class="topbar-search-icon" />
+                <input class="topbar-search-input" placeholder="Tìm số bàn, tên cơ hoặc giải đấu..." @bind="_query" @bind:event="oninput" />
+            </form>
+
+            <div class="topbar-actions">
+                <span class="club-pill"><span class="club-pill-dot"></span>Club online</span>
+                @if (AuthState.IsAuthenticated)
+                {
+                    <div class="account-menu">
+                        <button type="button" class="user-chip account-menu-trigger" @onclick="ToggleAccountMenu"
+                                aria-haspopup="menu" aria-expanded="@(_accountMenuOpen ? "true" : "false")" title="@AuthState.FullName">
+                            <span class="user-avatar">@Initial</span>
+                            <span class="user-chip-text">
+                                <span class="user-chip-name">@AuthState.FullName</span>
+                                <span class="user-chip-role">@RoleLabel</span>
+                            </span>
+                            <Icon Name="expand_more" Size="18" Class="account-menu-caret" />
+                        </button>
+                        @if (_accountMenuOpen)
+                        {
+                            <div class="account-menu-backdrop" @onclick="CloseAccountMenu"></div>
+                            <div class="account-menu-panel" role="menu">
+                                <div class="account-menu-head">
+                                    <span class="account-menu-name">@AuthState.FullName</span>
+                                    <span class="account-menu-role">@RoleLabel</span>
+                                </div>
+                                <a class="account-menu-item" href="profile" role="menuitem" @onclick="CloseAccountMenu">
+                                    <Icon Name="user" Size="18" /> Hồ sơ cá nhân
+                                </a>
+                                <a class="account-menu-item" href="wallet" role="menuitem" @onclick="CloseAccountMenu">
+                                    <Icon Name="wallet" Size="18" /> Ví của tôi
+                                </a>
+                                <button type="button" class="account-menu-item account-menu-logout topbar-logout" role="menuitem" @onclick="SignOut">
+                                    <Icon Name="logout" Size="18" /> Đăng xuất
+                                </button>
+                            </div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <a class="btn btn-ghost btn-sm" href="login">Đăng nhập</a>
+                    <a class="btn btn-primary btn-sm topbar-register" href="register">Đăng ký</a>
+                }
+            </div>
+        </header>
+
+        <main class="app-content">
+            @if (_restoringSession)
+            {
+                <p class="hint-text">Đang tải...</p>
+            }
+            else
+            {
+                @Body
+            }
+        </main>
+
+        <Footer />
+    </div>
+
+    @if (AuthState.IsAuthenticated)
+    {
+        <ChatWidget />
+    }
+
+    @* Thanh điều hướng dưới kiểu mobile app (Stitch) - chỉ hiện trên màn hình < 1024px.
+       Hiện cả khi CHƯA đăng nhập (trước đây khách chưa đăng nhập trên mobile không có cách
+       nào chuyển sang trang Cơ/Giải đấu/Ghép trận vì topnav bị ẩn). *@
+    <nav class="bottom-nav">
+        <NavLink class="bottom-nav-link" href="" Match="NavLinkMatch.All">
+            <Icon Name="grid" Size="22" />
+            <span>Bàn chơi</span>
+        </NavLink>
+        <NavLink class="bottom-nav-link" href="cues">
+            <Icon Name="bag" Size="22" />
+            <span>Thuê &amp; Mua Cơ</span>
+        </NavLink>
+        <NavLink class="bottom-nav-link" href="tournaments">
+            <Icon Name="trophy" Size="22" />
+            <span>Giải đấu</span>
+        </NavLink>
+        <NavLink class="bottom-nav-link" href="matches">
+            <Icon Name="users" Size="22" />
+            <span>Ghép trận</span>
+        </NavLink>
+        @if (AuthState.IsPlayer)
+        {
+            <NavLink class="bottom-nav-link" href="wallet">
+                <Icon Name="wallet" Size="22" />
+                <span>Ví</span>
+            </NavLink>
+        }
+    </nav>
+</div>
+
+@code {
+    // Đợt 16: chữ cái đầu của tên (avatar tròn trên header) và nhãn vai trò hiển thị.
+    private string Initial =>
+        string.IsNullOrWhiteSpace(AuthState.FullName)
+            ? "?"
+            : AuthState.FullName!.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries)[^1][..1].ToUpperInvariant();
+
+    private string RoleLabel => "Người chơi";
+
+    [Inject] private NavigationManager Nav { get; set; } = default!;
+
+    private string _query = string.Empty;
+
+    // Tên màn hình hiện tại cho header mobile (Stitch: "CUEMASTER / Bàn Chơi").
+    private string PageTitle
+    {
+        get
+        {
+            var path = Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].TrimEnd('/');
+            return path switch
+            {
+                "" => "Bàn Chơi",
+                "cues" => "Thuê & Mua Cơ",
+                "tournaments" => "Giải Đấu",
+                "matches" => "Ghép Trận",
+                "wallet" => "Tài Khoản & Ví",
+                "profile" => "Tài Khoản",
+                "search" => "Tìm Kiếm",
+                "login" => "Đăng Nhập",
+                "register" => "Đăng Ký",
+                _ => "Club & Cue",
+            };
+        }
+    }
+
+    private void Search()
+    {
+        var q = _query.Trim();
+        if (q.Length > 0)
+        {
+            Nav.NavigateTo($"search?q={Uri.EscapeDataString(q)}");
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        _accountMenuOpen = false;
+        InvokeAsync(StateHasChanged);
+    }
+
+    // Menu tài khoản (avatar góc trên phải): Hồ sơ / Ví / Đăng xuất.
+    private bool _accountMenuOpen;
+
+    private void ToggleAccountMenu() => _accountMenuOpen = !_accountMenuOpen;
+
+    private void CloseAccountMenu() => _accountMenuOpen = false;
+}
+
+@code {
+    // Gate @Body until a restore attempt finishes - without this, a child page's own
+    // OnInitializedAsync (e.g. Profile.razor checking AuthState.IsAuthenticated) can run
+    // before the token is restored from storage and wrongly redirect to /login, since
+    // Blazor starts rendering @Body on the same first pass as this layout's own
+    // OnInitializedAsync, before either async method has completed.
+    private bool _restoringSession = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        AuthState.Changed += OnAuthChanged;
+
+        if (!AuthState.IsAuthenticated)
+        {
+            var restored = await AuthStorage.TryRestoreAsync();
+            // Trang khách chỉ dành cho Người chơi: phiên Nhân viên/Admin đã lưu từ trước
+            // (khi còn tab "Nhân viên") bị xóa - họ dùng cổng nhân viên riêng.
+            if (restored is not null && string.Equals(restored.Value.Role, "Player", StringComparison.OrdinalIgnoreCase))
+            {
+                AuthState.SignIn(restored.Value.Token, restored.Value.Role, restored.Value.FullName);
+            }
+            else if (restored is not null)
+            {
+                await AuthStorage.ClearAsync();
+            }
+        }
+
+        _restoringSession = false;
+    }
+
+    private void OnAuthChanged() => StateHasChanged();
+
+    private async Task SignOut()
+    {
+        _accountMenuOpen = false;
+        AuthState.SignOut();
+        await AuthStorage.ClearAsync();
+        await MyBookings.ClearAsync();
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        AuthState.Changed -= OnAuthChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+        return ValueTask.CompletedTask;
+    }
+}

@@ -1,0 +1,120 @@
+@page "/staff/shift"
+@rendermode InteractiveServer
+@inject ShiftApiService ShiftApiService
+@inject AttendanceApiService AttendanceApiService
+@inject AuthState AuthState
+
+<div class="page-narrow">
+<h1><Icon Name="clock" Size="22" /> Ca làm việc</h1>
+
+@if (!AuthState.IsStaffOrAdmin)
+{
+    <p class="hint-text">Trang này chỉ dành cho Nhân viên và Admin. Vui lòng đăng nhập.</p>
+}
+else
+{
+    <div class="section card form-card">
+        <h2><Icon Name="clock" Size="18" /> Bàn giao ca làm việc</h2>
+        @if (_activeShift is null)
+        {
+            <p class="hint-text">Bạn chưa bắt đầu ca làm việc nào.</p>
+            <div class="form-field">
+                <label>Tiền quỹ đầu ca</label>
+                <input class="input" type="number" min="0" @bind="_openingCash" />
+            </div>
+            <button class="btn btn-primary" @onclick="StartShift">Bắt đầu ca (chấm công vào)</button>
+        }
+        else
+        {
+            var elapsed = DateTime.UtcNow - _activeShift.StartedAtUtc;
+            <p class="hint-text">
+                Ca bắt đầu lúc @_activeShift.StartedAtUtc.ToLocalTime().ToString("HH:mm dd/MM/yyyy")
+                (đã chạy @elapsed.ToString(@"hh\:mm")), quỹ đầu ca @_activeShift.OpeningCashAmount.ToString("N0") đ.
+            </p>
+            @if (_openAttendance is not null)
+            {
+                <p class="hint-text">Đã chấm công lúc @_openAttendance.ClockInAtUtc.ToLocalTime().ToString("HH:mm").</p>
+            }
+            <div class="form-field">
+                <label>Tiền quỹ cuối ca</label>
+                <input class="input" type="number" min="0" @bind="_closingCash" />
+            </div>
+            <div class="form-field">
+                <label>Ghi chú bàn giao cho ca sau</label>
+                <textarea class="input" rows="3" @bind="_handoverNote"></textarea>
+            </div>
+            <button class="btn btn-primary" @onclick="EndShift">Kết thúc ca (chấm công ra)</button>
+        }
+
+        @if (!string.IsNullOrEmpty(_shiftMessage))
+        {
+            <p class="hint-text">@_shiftMessage</p>
+        }
+    </div>
+}
+
+</div>
+
+@code {
+    private ShiftDto? _activeShift;
+    private decimal _openingCash;
+    private decimal _closingCash;
+    private string? _handoverNote;
+    private string? _shiftMessage;
+
+    private AttendanceDto? _openAttendance;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsStaffOrAdmin)
+        {
+            return;
+        }
+
+        await LoadShiftAsync();
+        await LoadAttendanceAsync();
+    }
+
+    private async Task LoadShiftAsync()
+    {
+        _activeShift = await ShiftApiService.GetMyActiveShiftAsync();
+    }
+
+    private async Task LoadAttendanceAsync()
+    {
+        var list = await AttendanceApiService.GetMyTodayAsync();
+        _openAttendance = list.FirstOrDefault(a => a.ClockOutAtUtc is null);
+    }
+
+    private async Task StartShift()
+    {
+        var (success, shift, error) = await ShiftApiService.StartShiftAsync(_openingCash);
+        if (success)
+        {
+            _activeShift = shift;
+            _shiftMessage = "Đã bắt đầu ca làm việc.";
+            await LoadAttendanceAsync();
+        }
+        else
+        {
+            _shiftMessage = error;
+        }
+    }
+
+    private async Task EndShift()
+    {
+        if (_activeShift is null) return;
+
+        var (success, error) = await ShiftApiService.EndShiftAsync(_activeShift.Id, _closingCash, _handoverNote);
+        if (success)
+        {
+            _shiftMessage = "Đã kết thúc ca làm việc.";
+            await LoadShiftAsync();
+            await LoadAttendanceAsync();
+        }
+        else
+        {
+            _shiftMessage = error;
+        }
+    }
+}

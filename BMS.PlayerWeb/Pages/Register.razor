@@ -1,0 +1,123 @@
+@page "/register"
+@inject AccountApiService AccountApiService
+@inject AuthState AuthState
+@inject AuthStorageService AuthStorage
+@inject NavigationManager NavigationManager
+
+<div class="login-page">
+    <div class="login-icon">
+        <img src="images/logo-mark.svg" alt="" />
+    </div>
+    <h1 class="login-title">Đăng ký tài khoản</h1>
+    <p class="login-subtitle">Tạo tài khoản khách hàng để đặt bàn nhanh hơn</p>
+
+    <div class="login-form-card">
+        <EditForm Model="_model" OnValidSubmit="HandleRegister">
+            <div class="form-field">
+                <label for="fullName">Họ và tên</label>
+                <input id="fullName" class="input" @bind="_model.FullName" placeholder="Nguyễn Văn A" />
+            </div>
+            <div class="form-field">
+                <label for="email">Email</label>
+                <div class="input-icon-wrap">
+                    <span class="input-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M3 5h18v14H3V5Z" stroke="currentColor" stroke-width="1.6" />
+                            <path d="m3 6 9 7 9-7" stroke="currentColor" stroke-width="1.6" />
+                        </svg>
+                    </span>
+                    <InputText id="email" @bind-Value="_model.Email" class="input" placeholder="ban@example.com" />
+                </div>
+            </div>
+            <div class="form-field">
+                <label for="phone">Số điện thoại (tùy chọn)</label>
+                <input id="phone" class="input" @bind="_model.PhoneNumber" placeholder="09xx xxx xxx" />
+            </div>
+            <div class="form-field">
+                <label for="skillLevel">Trình độ chơi</label>
+                <select id="skillLevel" class="input" @bind="_model.SkillLevel">
+                    <option value="800">Mới tập</option>
+                    <option value="1000">Trung bình</option>
+                    <option value="1200">Khá</option>
+                    <option value="1500">Giỏi</option>
+                </select>
+            </div>
+            <div class="form-field">
+                <label for="password">Mật khẩu</label>
+                <div class="input-icon-wrap">
+                    <span class="input-icon">
+                        <svg width="14" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="4" y="10" width="16" height="10" rx="2" stroke="currentColor" stroke-width="1.6" />
+                            <path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="1.6" />
+                        </svg>
+                    </span>
+                    <InputText id="password" type="@(_showPassword ? "text" : "password")" @bind-Value="_model.Password" class="input" placeholder="Tối thiểu 6 ký tự" />
+                    <button type="button" class="input-icon-toggle" @onclick="TogglePassword" tabindex="-1">
+                        @(_showPassword ? "Ẩn" : "Hiện")
+                    </button>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <p class="error-text">@_error</p>
+            }
+
+            <button type="submit" class="btn btn-primary btn-block" disabled="@_busy">
+                @(_busy ? "Đang đăng ký..." : "Đăng ký")
+            </button>
+        </EditForm>
+
+        <p class="auth-switch">Đã có tài khoản? <a href="login">Đăng nhập</a></p>
+    </div>
+</div>
+
+@code {
+    private RegisterModel _model = new();
+    private string? _error;
+    private bool _busy;
+    private bool _showPassword;
+
+    private async Task HandleRegister()
+    {
+        if (string.IsNullOrWhiteSpace(_model.FullName) ||
+            string.IsNullOrWhiteSpace(_model.Email) ||
+            string.IsNullOrWhiteSpace(_model.Password))
+        {
+            _error = "Vui lòng nhập đầy đủ họ tên, email và mật khẩu.";
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+
+        var (success, result, error) = await AccountApiService.RegisterAsync(_model.FullName, _model.Email, _model.Password, _model.PhoneNumber, _model.SkillLevel);
+
+        _busy = false;
+
+        if (success && result is not null)
+        {
+            AuthState.SignIn(result.Token, result.Role, result.FullName);
+            await AuthStorage.SaveAsync(result.Token, result.Role, result.FullName, remember: true);
+            NavigationManager.NavigateTo("/");
+        }
+        else
+        {
+            _error = error ?? "Đăng ký thất bại.";
+        }
+    }
+
+    private void TogglePassword()
+    {
+        _showPassword = !_showPassword;
+    }
+
+    private class RegisterModel
+    {
+        public string FullName { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string? PhoneNumber { get; set; }
+        public string Password { get; set; } = string.Empty;
+        public int SkillLevel { get; set; } = 1000;
+    }
+}

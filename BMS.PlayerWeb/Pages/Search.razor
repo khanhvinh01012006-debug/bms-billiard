@@ -1,0 +1,130 @@
+@page "/search"
+@inject TableApiService TableApiService
+@inject CueApiService CueApiService
+@inject TournamentApiService TournamentApiService
+
+@* Đợt 16: trang kết quả cho ô tìm kiếm trên header (Stitch: "Tìm số bàn, mã cơ hoặc giao
+   dịch..."). Chỉ đọc dữ liệu qua các API sẵn có rồi lọc phía giao diện - không thêm API. *@
+
+<div class="page-head">
+    <span class="page-eyebrow"><span class="page-eyebrow-dot"></span>Tìm kiếm</span>
+    <h1>Kết quả cho “@Q”</h1>
+</div>
+
+<form class="page-search" @onsubmit="Submit" @onsubmit:preventDefault="true">
+    <Icon Name="search" Size="20" Class="page-search-icon" />
+    <input class="page-search-input" placeholder="Tìm số bàn, tên cơ, giải đấu..." @bind="_input" @bind:event="oninput" />
+</form>
+
+@if (_loading)
+{
+    <p class="hint-text">Đang tìm...</p>
+}
+else if (string.IsNullOrWhiteSpace(Q))
+{
+    <p class="page-empty">Nhập từ khóa để tìm bàn, cơ hoặc giải đấu.</p>
+}
+else
+{
+    <p class="hint-text">Tìm thấy @(_tables.Count + _cues.Count + _tournaments.Count) kết quả.</p>
+
+    <section class="search-section">
+        <h2><Icon Name="grid" Size="20" /> Bàn chơi (@_tables.Count)</h2>
+        @if (_tables.Count == 0)
+        {
+            <p class="page-empty">Không có bàn phù hợp.</p>
+        }
+        @foreach (var t in _tables)
+        {
+            <a class="search-row" href="">
+                <span class="search-row-main">@t.Name</span>
+                <span class="search-row-sub">@(t.TableTypeName ?? "Bàn") · @t.Capacity người · @t.PricePerHour.ToString("N0")đ/giờ</span>
+                <span class="search-row-tag">@StatusLabel(t.Status)</span>
+            </a>
+        }
+    </section>
+
+    <section class="search-section">
+        <h2><Icon Name="cue" Size="20" /> Cơ (@_cues.Count)</h2>
+        @if (_cues.Count == 0)
+        {
+            <p class="page-empty">Không có cơ phù hợp.</p>
+        }
+        @foreach (var c in _cues)
+        {
+            <a class="search-row" href="cues">
+                <span class="search-row-main">@c.Name</span>
+                <span class="search-row-sub">
+                    @(c.Brand ?? "—") ·
+                    @(c.IsForSale ? $"Giá bán {(c.SalePrice ?? 0):N0}đ" : $"Thuê {c.PricePerHour:N0}đ/giờ")
+                </span>
+                <span class="search-row-tag">@(c.IsForSale ? "Đang bán" : "Cho thuê")</span>
+            </a>
+        }
+    </section>
+
+    <section class="search-section">
+        <h2><Icon Name="trophy" Size="20" /> Giải đấu (@_tournaments.Count)</h2>
+        @if (_tournaments.Count == 0)
+        {
+            <p class="page-empty">Không có giải đấu phù hợp.</p>
+        }
+        @foreach (var t in _tournaments)
+        {
+            <a class="search-row" href="tournaments">
+                <span class="search-row-main">@t.Name</span>
+                <span class="search-row-sub">@t.StartDateUtc.ToLocalTime().ToString("dd/MM/yyyy") · Lệ phí @t.EntryFee.ToString("N0")đ</span>
+            </a>
+        }
+    </section>
+}
+
+@code {
+    [Inject] private NavigationManager NavigationManager { get; set; } = default!;
+
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? Q { get; set; }
+
+    private string _input = string.Empty;
+    private bool _loading = true;
+    private List<TableDto> _tables = new();
+    private List<CueDto> _cues = new();
+    private List<TournamentDto> _tournaments = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _input = Q ?? string.Empty;
+        _loading = true;
+        if (string.IsNullOrWhiteSpace(Q))
+        {
+            _loading = false;
+            return;
+        }
+
+        var q = Q.Trim();
+        bool Has(string? s) => !string.IsNullOrEmpty(s) && s.Contains(q, StringComparison.OrdinalIgnoreCase);
+
+        _tables = (await TableApiService.GetTablesAsync()).Where(t => Has(t.Name) || Has(t.TableTypeName)).ToList();
+        _cues = (await CueApiService.GetCuesAsync()).Where(c => Has(c.Name) || Has(c.Brand) || Has(c.Category)).ToList();
+        _tournaments = (await TournamentApiService.GetTournamentsAsync()).Where(t => !string.Equals(t.Status, "Draft", StringComparison.OrdinalIgnoreCase) && (Has(t.Name) || Has(t.Description))).ToList();
+        _loading = false;
+    }
+
+    private void Submit()
+    {
+        var q = _input.Trim();
+        if (q.Length > 0)
+        {
+            NavigationManager.NavigateTo($"search?q={Uri.EscapeDataString(q)}");
+        }
+    }
+
+    private static string StatusLabel(TableStatus status) => status switch
+    {
+        TableStatus.Available => "Bàn trống",
+        TableStatus.Occupied => "Đang chơi",
+        TableStatus.Reserved => "Đã đặt",
+        TableStatus.Maintenance => "Bảo trì",
+        _ => status.ToString()
+    };
+}

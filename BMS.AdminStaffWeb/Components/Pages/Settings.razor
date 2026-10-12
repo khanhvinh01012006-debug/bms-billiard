@@ -1,0 +1,124 @@
+@page "/settings"
+@rendermode InteractiveServer
+@inject SettingsApiService SettingsApiService
+@inject AuthState AuthState
+
+<h1><Icon Name="settings" Size="22" /> Cấu hình chung</h1>
+
+@if (!AuthState.IsAdmin)
+{
+    <p class="page-empty">Bạn không có quyền truy cập trang này. Vui lòng đăng nhập bằng tài khoản Admin.</p>
+}
+else if (_form is null)
+{
+    <p class="page-empty">Đang tải...</p>
+}
+else
+{
+    <div class="page-grid-2">
+    <div class="card form-card">
+        <h2>Thông tin quán</h2>
+        <p class="hint-text">Hiển thị ở chân trang web người chơi.</p>
+        <div class="form-field">
+            <label for="s-name">Tên quán</label>
+            <input id="s-name" class="input" @bind="_form.ClubName" maxlength="100" />
+        </div>
+        <div class="form-field">
+            <label for="s-hotline">Hotline</label>
+            <input id="s-hotline" class="input" @bind="_form.Hotline" inputmode="tel" />
+        </div>
+        <div class="form-field">
+            <label for="s-email">Email</label>
+            <input id="s-email" class="input" type="email" @bind="_form.Email" />
+        </div>
+        <div class="form-field">
+            <label for="s-fb">Facebook (đường dẫn)</label>
+            <input id="s-fb" class="input" @bind="_form.FacebookUrl" placeholder="https://www.facebook.com/..." />
+        </div>
+        <div class="form-field">
+            <label for="s-address">Địa chỉ</label>
+            <input id="s-address" class="input" @bind="_form.Address" placeholder="Để trống = Đang cập nhật" />
+        </div>
+        <div class="form-field">
+            <label for="s-web">Website</label>
+            <input id="s-web" class="input" @bind="_form.Website" placeholder="https://..." />
+        </div>
+    </div>
+
+    <div class="card form-card">
+        <h2>Tài khoản nhận chuyển khoản (VietQR)</h2>
+        <p class="hint-text">Dùng để tạo mã QR chuyển khoản có sẵn số tiền ở màn thanh toán của nhân viên. Để trống cả hai ô thì ẩn phương thức QR.</p>
+        <div class="form-field">
+            <label for="s-bin">Mã BIN ngân hàng (6 số, VD 970423 = TPBank, 970436 = Vietcombank)</label>
+            <input id="s-bin" class="input" @bind="_form.BankBin" inputmode="numeric" maxlength="6" />
+        </div>
+        <div class="form-field">
+            <label for="s-acc">Số tài khoản</label>
+            <input id="s-acc" class="input" @bind="_form.BankAccountNumber" inputmode="numeric" />
+        </div>
+        <div class="form-field">
+            <label for="s-accname">Tên chủ tài khoản (không dấu)</label>
+            <input id="s-accname" class="input" @bind="_form.BankAccountName" />
+        </div>
+        @if (!string.IsNullOrWhiteSpace(_form.BankBin) && !string.IsNullOrWhiteSpace(_form.BankAccountNumber))
+        {
+            <p class="hint-text">Xem thử mã QR (10.000đ):</p>
+            <img class="qr-pay-image" width="180" height="180" alt="Mã QR chuyển khoản xem thử"
+                 src="@($"https://img.vietqr.io/image/{_form.BankBin}-{_form.BankAccountNumber}-compact2.png?amount=10000&addInfo=TEST&accountName={Uri.EscapeDataString(_form.BankAccountName ?? "")}")" />
+        }
+    </div>
+
+    </div>
+
+    <div class="form-actions page-actions">
+        <button class="btn btn-primary" @onclick="Save" disabled="@_busy">@(_busy ? "Đang lưu..." : "Lưu cấu hình")</button>
+    </div>
+    @if (!string.IsNullOrEmpty(_message))
+    {
+        <p class="@(_ok ? "hint-text" : "error-text")" role="status">@_message</p>
+    }
+}
+
+@code {
+    private SettingsForm? _form;
+    private string? _message;
+    private bool _ok;
+    private bool _busy;
+
+    private class SettingsForm
+    {
+        public string ClubName { get; set; } = "";
+        public string? Hotline { get; set; }
+        public string? Email { get; set; }
+        public string? FacebookUrl { get; set; }
+        public string? Address { get; set; }
+        public string? Website { get; set; }
+        public string? BankBin { get; set; }
+        public string? BankAccountNumber { get; set; }
+        public string? BankAccountName { get; set; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsAdmin) return;
+        var s = await SettingsApiService.GetAsync();
+        _form = new SettingsForm
+        {
+            ClubName = s.ClubName, Hotline = s.Hotline, Email = s.Email, FacebookUrl = s.FacebookUrl,
+            Address = s.Address, Website = s.Website, BankBin = s.BankBin,
+            BankAccountNumber = s.BankAccountNumber, BankAccountName = s.BankAccountName,
+        };
+    }
+
+    private async Task Save()
+    {
+        if (_form is null) return;
+        _busy = true;
+        var (success, error) = await SettingsApiService.UpdateAsync(new ClubSettingsDto(
+            _form.ClubName, _form.Hotline, _form.Email, _form.FacebookUrl, _form.Address, _form.Website,
+            _form.BankBin, _form.BankAccountNumber, _form.BankAccountName));
+        _busy = false;
+        _ok = success;
+        _message = success ? "Đã lưu cấu hình." : (string.IsNullOrWhiteSpace(error) ? "Lưu thất bại." : error);
+    }
+}

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="BMS.PlayerApp.VerifyPhonePage"
+             Title="Xác thực SĐT">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="20" Spacing="12">
+            <Label Text="Xác thực số điện thoại" FontSize="24" FontAttributes="Bold" TextColor="{StaticResource FeltDark}" />
+            <Label Text="Nhập số điện thoại và bấm Gửi mã, sau đó nhập mã OTP nhận được." FontSize="13" />
+
+            <Entry x:Name="PhoneEntry" Placeholder="Số điện thoại" Keyboard="Telephone" />
+            <Button Text="Gửi mã OTP" Clicked="OnSendOtpClicked" />
+
+            <Label x:Name="OtpInfoLabel" TextColor="{StaticResource FeltLight}" IsVisible="False" />
+
+            <Entry x:Name="OtpEntry" Placeholder="Nhập mã OTP (6 số)" Keyboard="Numeric" />
+            <Button Text="Xác thực" Clicked="OnVerifyClicked" />
+
+            <Label x:Name="ErrorLabel" Style="{StaticResource ErrorText}" IsVisible="False" />
+            <Label x:Name="SuccessLabel" TextColor="{StaticResource FeltLight}" IsVisible="False" Text="Xác thực số điện thoại thành công!" />
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>

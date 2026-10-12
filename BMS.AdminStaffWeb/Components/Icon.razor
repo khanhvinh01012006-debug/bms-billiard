@@ -1,0 +1,45 @@
+@* Đợt 13: đổi từ SVG tự vẽ sang font icon "Material Symbols Outlined" - ĐÚNG như file
+   Stitch thật xuất ra. Giữ nguyên tên tham số (Name/Size/Class) để không phải sửa lại
+   NavMenu.razor đã dùng <Icon />. *@
+
+<span class="material-symbols-outlined icon @Class" style="font-size:@(Size)px; width:@(Size)px; height:@(Size)px;" aria-hidden="true">@Symbol</span>
+
+@code {
+    /// <summary>Tên icon: dashboard, table, cue, trophy, wallet, user, users, chat, card,
+    /// clock, target, money, box, chart, shift, logout, close, attach.</summary>
+    [Parameter, EditorRequired] public string Name { get; set; } = string.Empty;
+
+    [Parameter] public int Size { get; set; } = 18;
+
+    [Parameter] public string Class { get; set; } = string.Empty;
+
+    private string Symbol => Name switch
+    {
+        "dashboard" => "dashboard",
+        "table" => "sports_score",
+        "cue" => "sports_martial_arts",
+        "trophy" => "emoji_events",
+        "wallet" => "account_balance_wallet",
+        "user" => "person",
+        "users" => "group",
+        "chat" => "chat",
+        "card" => "credit_card",
+        "clock" => "schedule",
+        "target" => "sports_score",
+        "money" => "payments",
+        "box" => "inventory_2",
+        "chart" => "query_stats",
+        "shift" => "manage_history",
+        "logout" => "logout",
+        "close" => "close",
+        "attach" => "attach_file",
+        "play" => "play_arrow",
+        "food" => "restaurant_menu",
+        "check" => "check_circle",
+        "grid" => "dashboard",
+        "history" => "history",
+        "arrow" => "arrow_forward",
+        "search" => "search",
+        _ => Name,
+    };
+}

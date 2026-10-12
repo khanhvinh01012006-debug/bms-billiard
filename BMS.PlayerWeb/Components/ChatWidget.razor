@@ -1,0 +1,186 @@
+@inject ChatApiService ChatApiService
+@inject AuthState AuthState
+@inject ApiOptions ApiOptions
+@implements IAsyncDisposable
+@using Microsoft.AspNetCore.SignalR.Client
+
+<button class="chat-fab" @onclick="ToggleOpen" title="Nhắn tin với nhân viên">
+    <Icon Name="chat" Size="24" />
+</button>
+
+@if (_open)
+{
+    <div class="chat-panel">
+        <div class="chat-panel-header">
+            <span>Nhắn tin với nhân viên</span>
+            <button class="chat-close" @onclick="ToggleOpen"><Icon Name="close" Size="16" /></button>
+        </div>
+        <div class="chat-messages">
+            @if (_thread is null)
+            {
+                <p class="hint-text">Đang kết nối...</p>
+            }
+            else if (_messages.Count == 0)
+            {
+                <p class="page-empty">Chưa có tin nhắn nào. Hãy gửi lời chào!</p>
+            }
+            else
+            {
+                @foreach (var m in _messages)
+                {
+                    <div class="chat-bubble @(IsMine(m) ? "chat-bubble-mine" : "chat-bubble-theirs")">
+                        <div class="chat-bubble-meta">@m.SenderName</div>
+                        @if (!string.IsNullOrEmpty(m.Text))
+                        {
+                            <div>@m.Text</div>
+                        }
+                        @if (!string.IsNullOrEmpty(m.ImageUrl))
+                        {
+                            <img class="chat-bubble-image" src="@m.ImageUrl" alt="ảnh" />
+                        }
+                    </div>
+                }
+            }
+        </div>
+        <div class="chat-input-row">
+            <label class="chat-attach-btn" title="Đính kèm ảnh">
+                <Icon Name="attach" Size="18" />
+                <InputFile OnChange="HandleFileSelected" class="chat-file-input" accept=".png,.jpg,.jpeg,.gif,.webp" />
+            </label>
+            <input class="input" placeholder="Nhập tin nhắn..." @bind="_draft" @bind:event="oninput"
+                   @onkeyup="HandleKeyUp" />
+            <button class="btn btn-primary btn-sm" @onclick="Send">Gửi</button>
+        </div>
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <p class="error-text">@_error</p>
+        }
+    </div>
+}
+
+@code {
+    private bool _open;
+    private ChatThreadDto? _thread;
+    private List<ChatMessageDto> _messages = new();
+    private string _draft = string.Empty;
+    private string? _error;
+    private HubConnection? _hubConnection;
+
+    private bool IsMine(ChatMessageDto m) => AuthState.FullName == m.SenderName;
+
+    private async Task ToggleOpen()
+    {
+        _open = !_open;
+        if (_open && _thread is null)
+        {
+            await InitAsync();
+        }
+    }
+
+    private async Task InitAsync()
+    {
+        _thread = await ChatApiService.GetOrCreateCustomerThreadAsync();
+        if (_thread is null)
+        {
+            _error = "Không kết nối được tới máy chủ trò chuyện.";
+            return;
+        }
+
+        _messages = await ChatApiService.GetMessagesAsync(_thread.Id);
+
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl($"{ApiOptions.BaseUrl}/hubs/bms")
+            .WithAutomaticReconnect(new ForeverRetryPolicy())
+            .Build();
+
+        // Mất kết nối rồi tự nối lại: tải lại dữ liệu vì các sự kiện phát ra lúc mất mạng đã bị lỡ.
+        _hubConnection.Reconnected += async _ =>
+        {
+            if (_thread is not null)
+            {
+                _messages = await ChatApiService.GetMessagesAsync(_thread.Id);
+            }
+            await InvokeAsync(StateHasChanged);
+        };
+
+        _hubConnection.On<ChatMessageDto>("ChatMessageReceived", async msg =>
+        {
+            if (_thread is not null && msg.ThreadId == _thread.Id)
+            {
+                _messages.Add(msg);
+                await InvokeAsync(StateHasChanged);
+            }
+        });
+
+        try
+        {
+            await _hubConnection.StartAsync();
+        }
+        catch
+        {
+            // Chat vẫn hoạt động qua tải lại thủ công nếu SignalR không kết nối được ngay.
+        }
+    }
+
+    private async Task HandleKeyUp(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await Send();
+        }
+    }
+
+    private async Task Send()
+    {
+        if (_thread is null || string.IsNullOrWhiteSpace(_draft)) return;
+
+        var text = _draft;
+        _draft = string.Empty;
+
+        var (success, error) = await ChatApiService.SendMessageAsync(_thread.Id, text, null);
+        if (!success)
+        {
+            _error = error;
+        }
+    }
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        if (_thread is null) return;
+
+        var file = e.File;
+        if (file is null) return;
+
+        try
+        {
+            const long maxSize = 5 * 1024 * 1024;
+            await using var stream = file.OpenReadStream(maxSize);
+            using var memoryStream = new MemoryStream();
+            await stream.CopyToAsync(memoryStream);
+
+            var (success, url, error) = await ChatApiService.UploadImageAsync(
+                memoryStream.ToArray(), file.Name, file.ContentType);
+
+            if (success && url is not null)
+            {
+                await ChatApiService.SendMessageAsync(_thread.Id, null, url);
+            }
+            else
+            {
+                _error = "Gửi ảnh thất bại: " + error;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = "Gửi ảnh thất bại: " + ex.Message;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
+}

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- Trình khởi động bản Windows "bấm đúp là chạy": chạy BMS.API + BMS.AdminStaffWeb (đã publish
+       self-contained, không cần cài .NET) và tự phục vụ trang Người chơi (BMS.PlayerWeb, file tĩnh). -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>BMS</AssemblyName>
+    <RootNamespace>BMS.Launcher</RootNamespace>
+    <ApplicationIcon>bms.ico</ApplicationIcon>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+</Project>

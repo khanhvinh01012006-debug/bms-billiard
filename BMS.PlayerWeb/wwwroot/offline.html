@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#2563EB" />
+    <title>BMS Billiard - Mất kết nối</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <style>
+        /* Trang offline độc lập (không cần Blazor/phông ngoài) - service worker trả về khi
+           không tải được trang vì mất mạng. Màu theo tokens.css. */
+        html, body { margin: 0; height: 100%; }
+        body {
+            display: flex; align-items: center; justify-content: center; padding: 24px;
+            box-sizing: border-box; background: #F8FAFC; color: #0F172A;
+            font-family: "Be Vietnam Pro", "Segoe UI", Roboto, system-ui, sans-serif;
+        }
+        main {
+            max-width: 360px; width: 100%; text-align: center; background: #FFFFFF;
+            border: 1px solid #E2E8F0; border-radius: 16px; padding: 32px 24px;
+            box-shadow: 0 1px 3px rgba(15, 23, 42, .05);
+        }
+        img { width: 64px; height: 64px; }
+        h1 { font-size: 1.375rem; margin: 16px 0 8px; }
+        p { color: #475569; line-height: 1.5; margin: 0 0 24px; }
+        button {
+            min-height: 44px; width: 100%; border: none; border-radius: 8px; cursor: pointer;
+            background: #2563EB; color: #FFFFFF; font: inherit; font-weight: 600; font-size: 1rem;
+        }
+        button:hover { background: #1D4ED8; }
+        button:focus-visible { outline: 3px solid rgba(37, 99, 235, .35); outline-offset: 2px; }
+    </style>
+</head>
+<body>
+    <main>
+        <img src="/images/logo-mark.svg" alt="" width="64" height="64" />
+        <h1>Không có kết nối mạng</h1>
+        <p>Vui lòng kiểm tra Wi-Fi hoặc dữ liệu di động rồi thử lại.</p>
+        <button type="button" onclick="location.reload()">Thử lại</button>
+    </main>
+    <script>
+        // Có mạng trở lại thì tự tải lại trang.
+        window.addEventListener('online', () => location.reload());
+    </script>
+</body>
+</html>

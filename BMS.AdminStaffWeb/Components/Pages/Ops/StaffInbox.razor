@@ -1,0 +1,154 @@
+@page "/inbox"
+@rendermode InteractiveServer
+@inject ChatApiService ChatApiService
+@inject AuthState AuthState
+@inject IConfiguration Configuration
+@inject NavigationManager NavigationManager
+@inject StaffNotificationService StaffNotifications
+@implements IAsyncDisposable
+@using Microsoft.AspNetCore.SignalR.Client
+
+<h1><Icon Name="chat" Size="22" /> Hộp thư</h1>
+
+@if (!AuthState.IsStaffOrAdmin)
+{
+    <p class="hint-text">Trang này chỉ dành cho Nhân viên và Admin. Vui lòng đăng nhập.</p>
+}
+else
+{
+    <div class="inbox-layout">
+        <div class="inbox-thread-list">
+            @if (_threads.Count == 0)
+            {
+                <p class="page-empty">Chưa có cuộc trò chuyện nào.</p>
+            }
+            else
+            {
+                @foreach (var t in _threads)
+                {
+                    <div class="inbox-thread-item @(_selected?.Id == t.Id ? "inbox-thread-item-active" : "")"
+                         @onclick="() => SelectThread(t)">
+                        <div class="table-name">@(t.Type == "TableStaff" ? $"Bàn: {t.TableName}" : t.CustomerName)</div>
+                        <div class="hint-text">@t.LastMessageAtUtc.ToLocalTime().ToString("HH:mm dd/MM")</div>
+                    </div>
+                }
+            }
+        </div>
+        <div class="inbox-messages">
+            @if (_selected is null)
+            {
+                <p class="page-empty">Chọn một cuộc trò chuyện để xem tin nhắn.</p>
+            }
+            else
+            {
+                <div class="chat-messages inbox-chat-messages">
+                    @foreach (var m in _messages)
+                    {
+                        <div class="chat-bubble @(m.SenderRole == "Staff" || m.SenderRole == "Admin" ? "chat-bubble-mine" : "chat-bubble-theirs")">
+                            <div class="chat-bubble-meta">@m.SenderName</div>
+                            @if (!string.IsNullOrEmpty(m.Text))
+                            {
+                                <div>@m.Text</div>
+                            }
+                            @if (!string.IsNullOrEmpty(m.ImageUrl))
+                            {
+                                <img class="chat-bubble-image" src="@m.ImageUrl" alt="ảnh" />
+                            }
+                        </div>
+                    }
+                </div>
+                <div class="chat-input-row">
+                    <input class="input" placeholder="Nhập tin nhắn..." @bind="_draft" @bind:event="oninput" @onkeyup="HandleKeyUp" />
+                    <button class="btn btn-primary btn-sm" @onclick="Send">Gửi</button>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private string ApiBaseUrl => (Configuration["Api:BaseUrl"] ?? "https://localhost:5001").TrimEnd('/');
+
+    private List<ChatThreadDto> _threads = new();
+    private List<ChatMessageDto> _messages = new();
+    private ChatThreadDto? _selected;
+    private string _draft = string.Empty;
+    private HubConnection? _hubConnection;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsStaffOrAdmin)
+        {
+            return;
+        }
+
+        _threads = await ChatApiService.GetThreadsAsync();
+
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl($"{ApiBaseUrl}/hubs/bms")
+            .WithAutomaticReconnect(new ForeverRetryPolicy())
+            .Build();
+
+        // Mất kết nối rồi tự nối lại: tải lại dữ liệu vì các sự kiện phát ra lúc mất mạng đã bị lỡ.
+        _hubConnection.Reconnected += async _ =>
+        {
+            _threads = await ChatApiService.GetThreadsAsync();
+            if (_selected is not null)
+            {
+                _messages = await ChatApiService.GetMessagesAsync(_selected.Id);
+            }
+            await InvokeAsync(StateHasChanged);
+        };
+
+        _hubConnection.On<ChatMessageDto>("ChatMessageReceived", async msg =>
+        {
+            if (_selected is not null && msg.ThreadId == _selected.Id)
+            {
+                _messages.Add(msg);
+            }
+            _threads = await ChatApiService.GetThreadsAsync();
+            await InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            await _hubConnection.StartAsync();
+        }
+        catch
+        {
+            // Falls back to manual refresh.
+        }
+    }
+
+    private async Task SelectThread(ChatThreadDto thread)
+    {
+        _selected = thread;
+        _messages = await ChatApiService.GetMessagesAsync(thread.Id);
+        await StaffNotifications.RefreshAsync();
+    }
+
+    private async Task HandleKeyUp(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await Send();
+        }
+    }
+
+    private async Task Send()
+    {
+        if (_selected is null || string.IsNullOrWhiteSpace(_draft)) return;
+
+        var text = _draft;
+        _draft = string.Empty;
+        await ChatApiService.SendMessageAsync(_selected.Id, text, null);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
+}

@@ -1,0 +1,223 @@
+@page "/tables/manage"
+@rendermode InteractiveServer
+@inject TableApiService TableApiService
+@inject AuthState AuthState
+
+<h1><Icon Name="table" Size="22" /> Quản lý bàn</h1>
+
+@if (!AuthState.IsAdmin)
+{
+    <p class="page-empty">Bạn không có quyền truy cập trang này. Vui lòng đăng nhập bằng tài khoản Admin.</p>
+}
+else
+{
+    <div class="card form-card">
+        <h2>@(_editingId is null ? "Thêm bàn mới" : $"Sửa bàn #{_editingId}")</h2>
+
+        <div class="form-field">
+            <label>Tên bàn</label>
+            <input class="input" @bind="_form.Name" />
+        </div>
+        <div class="form-field">
+            <label>Sức chứa</label>
+            <input class="input" type="number" @bind="_form.Capacity" />
+        </div>
+        <div class="form-field">
+            <label>Giá / giờ (đ)</label>
+            <input class="input" type="number" @bind="_form.PricePerHour" />
+        </div>
+        <div class="form-field">
+            <label>Trạng thái</label>
+            <select class="input" @bind="_form.Status">
+                <option value="Available">Trống</option>
+                <option value="Occupied">Đang chơi</option>
+                <option value="Reserved">Đã đặt</option>
+                <option value="Maintenance">Bảo trì</option>
+            </select>
+        </div>
+        <div class="form-field">
+            <label>Loại bàn</label>
+            <select class="input" @bind="_form.TableTypeId">
+                <option value="">-- Chưa gán loại --</option>
+                @foreach (var type in _tableTypes)
+                {
+                    <option value="@type.Id">@type.Name</option>
+                }
+            </select>
+            <p class="hint-text">Quản lý Loại bàn &amp; khung giờ tính giá tại <a href="table-types/manage">Loại bàn &amp; giá theo giờ</a>.</p>
+        </div>
+        <div class="form-field">
+            <label>Hình ảnh</label>
+            <InputFile OnChange="HandleFileSelected" accept=".png,.jpg,.jpeg,.gif,.svg,.webp" />
+            @if (!string.IsNullOrEmpty(_form.ImageUrl))
+            {
+                <img src="@_form.ImageUrl" alt="Ảnh bàn" class="preview-image" />
+            }
+        </div>
+
+        <div class="form-actions">
+            <button class="btn btn-primary" @onclick="Save">@(_editingId is null ? "Thêm" : "Lưu")</button>
+            @if (_editingId is not null)
+            {
+                <button class="btn btn-ghost" @onclick="ResetForm">Hủy</button>
+            }
+        </div>
+
+        @if (!string.IsNullOrEmpty(_message))
+        {
+            <p class="hint-text">@_message</p>
+        }
+    </div>
+
+    <div class="section">
+        <h2>Danh sách bàn</h2>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Tên</th>
+                    <th>Loại bàn</th>
+                    <th>Trạng thái</th>
+                    <th>Sức chứa</th>
+                    <th>Giá/giờ</th>
+                    <th>Xử lý</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var table in _tables)
+                {
+                    <tr>
+                        <td>@table.Name</td>
+                        <td>@(table.TableTypeName ?? "-")</td>
+                        <td>@StatusLabel(table.Status)</td>
+                        <td>@table.Capacity</td>
+                        <td>@table.PricePerHour.ToString("N0")</td>
+                        <td class="row-actions">
+                            <button class="btn btn-ghost btn-sm" @onclick="() => Edit(table)">Sửa</button>
+                            <button class="btn btn-danger btn-sm" @onclick="() => Delete(table.Id)">Xóa</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private List<TableDto> _tables = new();
+    private List<TableTypeDto> _tableTypes = new();
+    private TableFormModel _form = new();
+    private int? _editingId;
+    private string? _message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState.IsAdmin)
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _tables = await TableApiService.GetTablesAsync();
+        _tableTypes = await TableApiService.GetTableTypesAsync();
+    }
+
+    private void Edit(TableDto table)
+    {
+        _editingId = table.Id;
+        _form = new TableFormModel
+        {
+            Name = table.Name,
+            Capacity = table.Capacity,
+            PricePerHour = table.PricePerHour,
+            ImageUrl = table.ImageUrl,
+            Status = table.Status,
+            TableTypeId = _tableTypes.FirstOrDefault(t => t.Name == table.TableTypeName)?.Id
+        };
+    }
+
+    private void ResetForm()
+    {
+        _editingId = null;
+        _form = new TableFormModel();
+    }
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+
+        _message = "Đang tải ảnh lên...";
+        try
+        {
+            const long maxSize = 5 * 1024 * 1024;
+            await using var stream = file.OpenReadStream(maxSize);
+            using var memoryStream = new MemoryStream();
+            await stream.CopyToAsync(memoryStream);
+
+            var (success, url, error) = await TableApiService.UploadImageAsync(
+                memoryStream.ToArray(), file.Name, file.ContentType);
+
+            if (success)
+            {
+                _form.ImageUrl = url;
+                _message = "Đã tải ảnh lên (chỉ mới ở bộ nhớ tạm) — bấm nút \"Lưu\" bên dưới để áp dụng vào bàn, nếu không ảnh sẽ KHÔNG được lưu.";
+            }
+            else
+            {
+                _message = "Tải ảnh thất bại: " + error;
+            }
+        }
+        catch (Exception ex)
+        {
+            // Không để exception (ví dụ lỗi tin cậy chứng chỉ HTTPS dev khi gọi sang
+            // BMS.API) làm crash cả circuit Blazor - hiện lỗi rõ ràng cho người dùng.
+            _message = "Tải ảnh thất bại: " + ex.Message +
+                " (Nếu là lỗi kết nối/chứng chỉ HTTPS, hãy chạy 'dotnet dev-certs https --trust' rồi khởi động lại.)";
+        }
+    }
+
+    private async Task Save()
+    {
+        var request = new UpsertTableRequestDto(_form.Name, _form.Capacity, _form.PricePerHour, _form.ImageUrl, _form.Status, _form.TableTypeId);
+
+        var (success, error) = _editingId is null
+            ? await TableApiService.CreateTableAsync(request)
+            : await TableApiService.UpdateTableAsync(_editingId.Value, request);
+
+        _message = success ? "Đã lưu." : error;
+
+        if (success)
+        {
+            ResetForm();
+            await LoadAsync();
+        }
+    }
+
+    private async Task Delete(int id)
+    {
+        var (success, error) = await TableApiService.DeleteTableAsync(id);
+        _message = success ? "Đã xóa." : error;
+        await LoadAsync();
+    }
+
+    private class TableFormModel
+    {
+        public string Name { get; set; } = string.Empty;
+        public int Capacity { get; set; } = 2;
+        public decimal PricePerHour { get; set; } = 60000m;
+        public string? ImageUrl { get; set; }
+        public TableStatus Status { get; set; } = TableStatus.Available;
+        public int? TableTypeId { get; set; }
+    }
+
+    private static string StatusLabel(BMS.Shared.Dtos.TableStatus status) => status switch
+    {
+        BMS.Shared.Dtos.TableStatus.Available => "Trống",
+        BMS.Shared.Dtos.TableStatus.Occupied => "Đang chơi",
+        BMS.Shared.Dtos.TableStatus.Reserved => "Đã đặt",
+        BMS.Shared.Dtos.TableStatus.Maintenance => "Bảo trì",
+        _ => status.ToString()
+    };
+}

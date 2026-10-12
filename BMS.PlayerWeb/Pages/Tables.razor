@@ -1,0 +1,458 @@
+@page "/"
+@inject TableApiService TableApiService
+@inject CueApiService CueApiService
+@inject ApiOptions ApiOptions
+@inject AuthState AuthState
+@inject NavigationManager NavigationManager
+@inject MyBookingsService MyBookings
+@implements IAsyncDisposable
+@using Microsoft.AspNetCore.SignalR.Client
+
+@* Banner đầu trang theo thiết kế BilliardHub: ảnh bộ bi trên nỉ xanh, chữ giữ nguyên
+   (tiêu đề "Bàn chơi" + dòng hướng dẫn đặt bàn). Ảnh nằm ở màn hình đầu nên tải ngay. *@
+<section class="hero-banner">
+    <picture>
+        <source type="image/webp"
+                srcset="images/banners/hero-pool-balls-480.webp 480w, images/banners/hero-pool-balls-960.webp 960w, images/banners/hero-pool-balls-1200.webp 1200w"
+                sizes="(max-width: 1023px) 100vw, calc(100vw - 320px)" />
+        <img class="hero-banner-image" src="images/banners/hero-pool-balls-960.jpg" width="960" height="540"
+             alt="Bộ bi bi-a xếp hình tam giác trên bàn nỉ xanh" fetchpriority="high" />
+    </picture>
+    <div class="hero-banner-text">
+        <h1 id="table-list">Bàn chơi</h1>
+        @if (AuthState.IsAuthenticated)
+        {
+            <p class="hero-banner-sub">Đặt bàn với tên: <strong>@AuthState.FullName</strong></p>
+        }
+        else
+        {
+            <p class="hero-banner-sub">Vui lòng đăng nhập để đặt bàn.</p>
+        }
+    </div>
+</section>
+
+@* Đợt 15: dải thống kê nhanh 1 hàng theo Stitch "tinh gọn" (chấm emerald = đang chơi,
+   chấm xám = trống) - thay cho hero banner gradient + 3 ô thống kê. Hiện cho cả khách
+   và nhân viên vì giúp nắm nhanh tình trạng quán lúc đông khách. *@
+@if (!_loading)
+{
+    var reservedCount = _tables.Count(t => t.Status == BMS.Shared.Dtos.TableStatus.Reserved);
+    <section class="stat-strip">
+        <div class="stat-strip-group">
+            <span class="stat-strip-item">
+                <span class="stat-dot stat-dot-live"></span>
+                <strong>@_tables.Count(t => t.Status == BMS.Shared.Dtos.TableStatus.Occupied)</strong> chơi
+            </span>
+            <span class="stat-strip-sep">·</span>
+            <span class="stat-strip-item">
+                <span class="stat-dot"></span>
+                <strong>@_tables.Count(t => t.Status == BMS.Shared.Dtos.TableStatus.Available)</strong> trống
+            </span>
+            @if (reservedCount > 0)
+            {
+                <span class="stat-strip-sep">·</span>
+                <span class="stat-strip-item">
+                    <span class="stat-dot stat-dot-reserved"></span>
+                    <strong>@reservedCount</strong> đặt trước
+                </span>
+            }
+        </div>
+        <div class="stat-strip-total">
+            <span class="stat-strip-label">Tổng số bàn</span>
+            <span class="stat-strip-value">@_tables.Count</span>
+        </div>
+    </section>
+}
+
+@if (_myBookings.Count > 0)
+{
+    @* Đặt bàn của tôi: các lượt đặt vừa tạo trên trình duyệt này, khách tự hủy được khi
+       nhân viên chưa nhận bàn. *@
+    <section class="section my-bookings">
+        <h2>Đặt bàn của tôi</h2>
+        @foreach (var (entry, booking) in _myBookings)
+        {
+            var status = booking?.Status ?? "Unknown";
+            <div class="my-booking">
+                <div class="my-booking-text">
+                    <strong>@entry.TableName</strong>
+                    <span class="my-booking-time">Đặt lúc @entry.CreatedAtUtc.ToLocalTime().ToString("HH:mm dd/MM")</span>
+                </div>
+                <span class="status-pill my-booking-status-@status.ToLowerInvariant()">@BookingStatusLabel(status)</span>
+                @if (status is "Pending" or "Confirmed")
+                {
+                    <button class="btn btn-ghost btn-sm" @onclick="() => CancelMyBooking(entry)" disabled="@_cancelBusy">Hủy đặt bàn</button>
+                }
+            </div>
+        }
+    </section>
+}
+
+@if (_loading)
+{
+    <p>Đang tải...</p>
+}
+else
+{
+    var tableTypes = _tables
+        .Select(t => t.TableTypeName)
+        .Where(n => !string.IsNullOrWhiteSpace(n))
+        .Distinct()
+        .OrderBy(n => n)
+        .ToList();
+
+    @if (tableTypes.Count > 1)
+    {
+        <section class="filter-chip-row">
+            <button class="filter-chip @(_tableTypeFilter is null ? "filter-chip-active" : "")" @onclick="() => _tableTypeFilter = null">Tất cả (@_tables.Count)</button>
+            @foreach (var typeName in tableTypes)
+            {
+                <button class="filter-chip @(_tableTypeFilter == typeName ? "filter-chip-active" : "")" @onclick="() => _tableTypeFilter = typeName">@typeName (@_tables.Count(t => t.TableTypeName == typeName))</button>
+            }
+        </section>
+    }
+    <div class="table-grid table-grid-cards">
+        @foreach (var table in _tables.Where(t => _tableTypeFilter is null || t.TableTypeName == _tableTypeFilter))
+        {
+            var isOccupied = table.Status == BMS.Shared.Dtos.TableStatus.Occupied;
+            <article class="table-card status-@table.Status.ToString().ToLowerInvariant()">
+                <div class="tcard-felt" aria-hidden="true">
+                    @if (table.Status != BMS.Shared.Dtos.TableStatus.Available)
+                    {
+                        <span class="tcard-felt-label">@StatusLabel(table.Status)</span>
+                    }
+                </div>
+                @* Đợt 16: card đúng mẫu Stitch "tinh gọn" - tiêu đề 20px + dòng phụ "Loại ·
+                   giá/giờ" ngăn bằng dấu chấm giữa, pill trạng thái bên phải. *@
+                <div class="tcard-head">
+                    <div class="tcard-title-wrap">
+                        <div class="tcard-title-row">
+                            @if (IsVipType(table.TableTypeName))
+                            {
+                                <span class="tag-vip">VIP</span>
+                            }
+                            <h3 class="tcard-title">@table.Name</h3>
+                        </div>
+                        <p class="tcard-sub">
+                            @if (!string.IsNullOrEmpty(table.TableTypeName))
+                            {
+                                <span>@table.TableTypeName</span><span class="dot-sep">·</span>
+                            }
+                            <span>@table.Capacity người</span><span class="dot-sep">·</span>
+                            <span class="tcard-sub-strong">@table.PricePerHour.ToString("N0")đ/giờ</span>
+                        </p>
+                    </div>
+                    @if (isOccupied && table.ActiveSessionStartedAtUtc is not null)
+                    {
+                        var elapsed = (table.PausedAtUtc ?? DateTime.UtcNow) - table.ActiveSessionStartedAtUtc.Value;
+                        <span class="live-pill">
+                            @if (table.PausedAtUtc is not null)
+                            {
+                                <span>Tạm dừng</span>
+                            }
+                            else
+                            {
+                                <span class="live-pill-dot"></span>
+                            }
+                            <span class="live-pill-time">@elapsed.ToString(@"hh\:mm\:ss")</span>
+                        </span>
+                    }
+                    else
+                    {
+                        <span class="status-pill status-pill-@table.Status.ToString().ToLowerInvariant()">
+                            @if (table.Status == BMS.Shared.Dtos.TableStatus.Reserved)
+                            {
+                                <Icon Name="clock" Size="14" />
+                            }
+                            @(table.Status == BMS.Shared.Dtos.TableStatus.Available ? "Bàn trống" : StatusLabel(table.Status))
+                        </span>
+                    }
+                </div>
+
+                @if (table.Status == BMS.Shared.Dtos.TableStatus.Available)
+                {
+                    <button class="btn btn-primary btn-sm btn-full" @onclick="() => OpenBookingModal(table)">Đặt bàn</button>
+                }
+            </article>
+        }
+    </div>
+}
+
+@if (_featuredCues.Count > 0)
+{
+    <div class="section section-gap">
+        <h2>Cơ nổi bật</h2>
+        <div class="cue-grid">
+            @foreach (var cue in _featuredCues)
+            {
+                <a class="cue-card" href="cues" style="text-decoration:none;">
+                    <div class="cue-media">
+                        <ProductImage Url="@cue.ImageUrl" FallbackBase="@ProductImages.ForCue(cue.Name, cue.Brand, cue.Category)" Alt="@cue.Name" />
+                        <span class="cue-media-tag">
+                            <span class="cue-media-tag-dot @(cue.IsForSale ? "is-gold" : "")"></span>
+                            @(cue.IsForSale ? "Đang bán" : "Cho thuê")
+                        </span>
+                    </div>
+                    <div class="cue-body">
+                        <div class="cue-eyebrow-row">
+                            <span class="cue-eyebrow">@(string.IsNullOrWhiteSpace(cue.Brand) ? "BMS Cue" : cue.Brand)</span>
+                            <span class="cue-eyebrow-right">@(cue.IsForSale ? "Mua bán" : "Thuê theo giờ")</span>
+                        </div>
+                        <h3 class="cue-title">@cue.Name</h3>
+                        <div class="cue-price-row">
+                            <div class="cue-price">
+                                @if (cue.IsForSale)
+                                {
+                                    <span class="cue-price-value is-sale">@(cue.SalePrice?.ToString("N0") ?? "—")đ</span>
+                                }
+                                else
+                                {
+                                    <span class="cue-price-value">@cue.PricePerHour.ToString("N0")đ</span>
+                                    <span class="cue-price-unit">/giờ</span>
+                                }
+                            </div>
+                            <span class="cue-btn @(cue.IsForSale ? "cue-btn-buy" : "cue-btn-rent")">
+                                <span>Xem chi tiết</span>
+                                <Icon Name="arrow" Size="16" />
+                            </span>
+                        </div>
+                    </div>
+                </a>
+            }
+        </div>
+    </div>
+}
+
+@if (!string.IsNullOrEmpty(_message))
+{
+    <p class="toast-msg" @key="_message" role="status">@_message</p>
+}
+
+@if (_bookingModalTable is not null)
+{
+    <div class="modal-overlay" @onclick="CloseBookingModal">
+        <div class="modal-card" @onclick:stopPropagation="true">
+            <h2>Đặt @_bookingModalTable.Name</h2>
+            <div class="form-field">
+                <label>Họ tên</label>
+                <input class="input" @bind="_bookingForm.CustomerName" />
+            </div>
+            <div class="form-field">
+                <label>Số điện thoại</label>
+                <input class="input" @bind="_bookingForm.PhoneNumber" placeholder="09xxxxxxxx" />
+            </div>
+            <div class="form-field">
+                <label>Thời lượng</label>
+                <select class="input" @bind="_bookingForm.DurationMinutes">
+                    <option value="60">60 phút</option>
+                    <option value="90">90 phút</option>
+                    <option value="120">120 phút</option>
+                    <option value="180">180 phút</option>
+                </select>
+            </div>
+            <div class="form-field">
+                <label>Ghi chú (tùy chọn)</label>
+                <textarea class="input" rows="2" @bind="_bookingForm.Note"></textarea>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_bookingError))
+            {
+                <p class="error-text">@_bookingError</p>
+            }
+
+            <div class="form-actions">
+                <button class="btn btn-primary" @onclick="SubmitBooking" disabled="@_bookingBusy">
+                    @(_bookingBusy ? "Đang gửi..." : "Xác nhận đặt bàn")
+                </button>
+                <button class="btn btn-ghost" @onclick="CloseBookingModal">Hủy</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<TableDto> _tables = new();
+    private List<CueDto> _featuredCues = new();
+    private bool _loading = true;
+
+    // Đợt 12: lọc danh sách bàn theo loại (tab trên đầu lưới bàn, theo mẫu Stitch).
+    private string? _tableTypeFilter;
+    private string? _message;
+    private HubConnection? _hubConnection;
+
+    private List<(MyBookingsService.Entry Entry, BookingDto? Booking)> _myBookings = new();
+    private bool _cancelBusy;
+
+    private TableDto? _bookingModalTable;
+    private BookingFormModel _bookingForm = new();
+    private string? _bookingError;
+    private bool _bookingBusy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+
+        var cues = await CueApiService.GetCuesAsync();
+        _featuredCues = cues.OrderByDescending(c => c.IsForSale).Take(3).ToList();
+
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl($"{ApiOptions.BaseUrl}/hubs/bms")
+            .WithAutomaticReconnect(new ForeverRetryPolicy())
+            .Build();
+
+        // Mất kết nối rồi tự nối lại: tải lại dữ liệu vì các sự kiện phát ra lúc mất mạng đã bị lỡ.
+        _hubConnection.Reconnected += async _ =>
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        };
+
+        _hubConnection.On<TableStatusChangedEvent>("TableStatusChanged", async _ =>
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        });
+
+        _hubConnection.On<BookingExpiredEvent>("BookingExpired", async _ =>
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            await _hubConnection.StartAsync();
+        }
+        catch
+        {
+            // Falls back to manual refresh if the hub can't be reached yet.
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _tables = await TableApiService.GetTablesAsync();
+        _loading = false;
+        await LoadMyBookingsAsync();
+    }
+
+    private async Task LoadMyBookingsAsync()
+    {
+        var entries = await MyBookings.LoadAsync();
+        var list = new List<(MyBookingsService.Entry, BookingDto?)>();
+        foreach (var entry in entries)
+        {
+            list.Add((entry, await TableApiService.GetMyBookingAsync(entry.Id, entry.CancelToken)));
+        }
+        _myBookings = list;
+    }
+
+    private static string BookingStatusLabel(string status) => status switch
+    {
+        "Pending" => "Chờ nhân viên xác nhận",
+        "Confirmed" => "Đã giữ chỗ",
+        "CheckedIn" => "Đã nhận bàn",
+        "Cancelled" => "Đã hủy",
+        "Expired" => "Hết hạn giữ chỗ",
+        _ => "Không rõ"
+    };
+
+    private async Task CancelMyBooking(MyBookingsService.Entry entry)
+    {
+        _cancelBusy = true;
+        var (success, error) = await TableApiService.CancelMyBookingAsync(entry.Id, entry.CancelToken);
+        _cancelBusy = false;
+        _message = success ? "Đã hủy đặt bàn." : (string.IsNullOrWhiteSpace(error) ? "Không hủy được đặt bàn." : error);
+        await LoadAsync();
+    }
+
+    // Đợt 16: gắn tag "VIP" vàng trước tên bàn (như Stitch) khi loại bàn có chữ "VIP".
+    private static bool IsVipType(string? tableTypeName) =>
+        !string.IsNullOrWhiteSpace(tableTypeName)
+        && tableTypeName.Contains("VIP", StringComparison.OrdinalIgnoreCase);
+
+    private static string StatusLabel(BMS.Shared.Dtos.TableStatus status) => status switch
+    {
+        BMS.Shared.Dtos.TableStatus.Available => "Trống",
+        BMS.Shared.Dtos.TableStatus.Occupied => "Đang chơi",
+        BMS.Shared.Dtos.TableStatus.Reserved => "Đã đặt",
+        BMS.Shared.Dtos.TableStatus.Maintenance => "Bảo trì",
+        _ => status.ToString()
+    };
+
+    private void OpenBookingModal(TableDto table)
+    {
+        if (!AuthState.IsAuthenticated)
+        {
+            _message = "Vui lòng đăng nhập để đặt bàn.";
+            NavigationManager.NavigateTo("/login");
+            return;
+        }
+
+        _bookingModalTable = table;
+        _bookingForm = new BookingFormModel
+        {
+            CustomerName = AuthState.FullName ?? string.Empty,
+            DurationMinutes = 120
+        };
+        _bookingError = null;
+    }
+
+    private void CloseBookingModal()
+    {
+        _bookingModalTable = null;
+    }
+
+    private async Task SubmitBooking()
+    {
+        if (_bookingModalTable is null) return;
+
+        if (string.IsNullOrWhiteSpace(_bookingForm.CustomerName))
+        {
+            _bookingError = "Vui lòng nhập họ tên.";
+            return;
+        }
+
+        _bookingBusy = true;
+        _bookingError = null;
+
+        var (success, booking, error) = await TableApiService.CreateBookingAsync(
+            _bookingModalTable.Id, _bookingForm.CustomerName, _bookingForm.PhoneNumber,
+            _bookingForm.Note, _bookingForm.DurationMinutes);
+
+        _bookingBusy = false;
+
+        if (success)
+        {
+            if (booking?.CancelToken is not null)
+            {
+                await MyBookings.AddAsync(new MyBookingsService.Entry(
+                    booking.Id, booking.CancelToken, _bookingModalTable.Name, booking.CreatedAtUtc));
+            }
+            _message = "Đặt bàn thành công! Vui lòng chờ nhân viên xác nhận giữ chỗ trong 15 phút.";
+            _bookingModalTable = null;
+            await LoadAsync();
+        }
+        else
+        {
+            _bookingError = error;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
+
+    private class BookingFormModel
+    {
+        public string CustomerName { get; set; } = string.Empty;
+        public string? PhoneNumber { get; set; }
+        public string? Note { get; set; }
+        public int DurationMinutes { get; set; } = 120;
+    }
+}

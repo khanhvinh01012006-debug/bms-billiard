@@ -1,0 +1,579 @@
+@page "/cues"
+@inject CueApiService CueApiService
+@inject WalletApiService WalletApiService
+@inject AuthState AuthState
+@inject NavigationManager NavigationManager
+
+<h1><Icon Name="cue" Size="22" /> Thuê &amp; Mua Cơ</h1>
+
+@* Đợt 16: theo Stitch "Chợ thuê cơ tinh gọn" - ô tìm kiếm + tab bo 8px + banner. Ba tab
+   tách riêng chức năng: Thuê theo giờ (chỉ cơ cho thuê), Mua bán (chỉ hàng đang bán),
+   Trade (tin trao đổi giữa người chơi). *@
+<div class="page-search">
+    <Icon Name="search" Size="20" Class="page-search-icon" />
+    <input class="page-search-input" placeholder="@SearchPlaceholder" @bind="_search" @bind:event="oninput" />
+</div>
+
+<section class="cue-tabs">
+    <button class="cue-tab @(_tab == Tab.Rent ? "cue-tab-active" : "")" @onclick="SwitchToRent">Thuê theo giờ</button>
+    <button class="cue-tab @(_tab == Tab.Sale ? "cue-tab-active" : "")" @onclick="SwitchToSale">Mua bán</button>
+    <button class="cue-tab @(_tab == Tab.Trade ? "cue-tab-active" : "")" @onclick="SwitchToTrade">Trade</button>
+</section>
+
+<div class="promo-banner">
+    <div>
+        <span class="promo-eyebrow"><Icon Name="verified" Size="16" />@PromoTitle</span>
+        <p class="promo-text">@PromoText</p>
+    </div>
+    <span class="promo-icon"><Icon Name="@PromoIcon" Size="22" /></span>
+</div>
+
+@if (_loading)
+{
+    <p>Đang tải...</p>
+}
+else if (_tab == Tab.Rent)
+{
+    @* Đợt 16: card cơ đúng mẫu Stitch "Chợ thuê cơ tinh gọn". *@
+    <div class="cue-grid">
+        @foreach (var cue in _cues.Where(c => !c.IsForSale && MatchesSearch(c.Name, c.Brand, c.Category)))
+        {
+            <div class="cue-card" @onclick="() => OpenCueDetail(cue)">
+                <div class="cue-media">
+                    <ProductImage Url="@cue.ImageUrl" FallbackBase="@ProductImages.ForCue(cue.Name, cue.Brand, cue.Category)" Alt="@cue.Name" />
+                    <span class="cue-media-tag">
+                        <span class="cue-media-tag-dot @(cue.AvailableCount > 0 ? "" : "is-off")"></span>
+                        @(cue.AvailableCount > 0 ? $"Còn {cue.AvailableCount} cây • Sẵn sàng" : "Đã cho thuê hết")
+                    </span>
+                    @if (!string.IsNullOrWhiteSpace(cue.Category))
+                    {
+                        <span class="cue-media-spec">@cue.Category</span>
+                    }
+                </div>
+                <div class="cue-body">
+                    <div class="cue-eyebrow-row">
+                        <span class="cue-eyebrow">@(string.IsNullOrWhiteSpace(cue.Brand) ? "Cơ cho thuê" : cue.Brand)</span>
+                        <span class="cue-eyebrow-right">Thuê theo giờ</span>
+                    </div>
+                    <h3 class="cue-title">@cue.Name</h3>
+                    <div class="cue-price-row">
+                        <div class="cue-price">
+                            <span class="cue-price-value">@cue.PricePerHour.ToString("N0")đ</span>
+                            <span class="cue-price-unit">/giờ</span>
+                        </div>
+                        <button class="cue-btn cue-btn-rent" disabled="@(cue.AvailableCount <= 0)"
+                                @onclick="() => Rent(cue.Id)" @onclick:stopPropagation="true">
+                            <span>Thuê ngay</span>
+                            <Icon Name="arrow" Size="16" />
+                        </button>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+else if (_tab == Tab.Sale)
+{
+    var allSaleItems = _cues.Where(c => c.IsForSale && MatchesSearch(c.Name, c.Brand, c.Category)).ToList();
+    var categories = allSaleItems
+        .Select(c => c.Category)
+        .Where(c => !string.IsNullOrWhiteSpace(c))
+        .Distinct()
+        .OrderBy(c => c)
+        .ToList();
+
+    <div class="shop-filter-row">
+        <button class="shop-chip @(_saleCategory is null ? "shop-chip-active" : "")" @onclick="() => SetSaleCategory(null)">Tất cả</button>
+        @foreach (var category in categories)
+        {
+            <button class="shop-chip @(_saleCategory == category ? "shop-chip-active" : "")" @onclick="() => SetSaleCategory(category)">@category</button>
+        }
+    </div>
+
+    var brands = allSaleItems
+        .Select(c => c.Brand)
+        .Where(b => !string.IsNullOrWhiteSpace(b))
+        .Distinct()
+        .OrderBy(b => b)
+        .ToList();
+
+    @if (brands.Count > 0)
+    {
+        <div class="shop-brand-select-row">
+            <label for="sale-brand-select" class="hint-text">Hãng:</label>
+            <select id="sale-brand-select" class="input input-sm" value="@_saleBrand" @onchange="@(e => SetSaleBrand(string.IsNullOrEmpty(e.Value?.ToString()) ? null : e.Value!.ToString()))">
+                <option value="">Tất cả hãng</option>
+                @foreach (var brand in brands)
+                {
+                    <option value="@brand">@brand</option>
+                }
+            </select>
+        </div>
+    }
+
+    var saleItems = allSaleItems
+        .Where(c => _saleCategory is null || c.Category == _saleCategory)
+        .Where(c => _saleBrand is null || c.Brand == _saleBrand)
+        .ToList();
+
+    if (saleItems.Count == 0)
+    {
+        <p class="page-empty">Hiện chưa có sản phẩm nào trong nhóm này.</p>
+    }
+    else
+    {
+        <div class="cue-grid">
+            @foreach (var cue in saleItems)
+            {
+                <div class="cue-card" @onclick="() => OpenCueDetail(cue)">
+                    <div class="cue-media">
+                        <ProductImage Url="@cue.ImageUrl" FallbackBase="@ProductImages.ForCue(cue.Name, cue.Brand, cue.Category)" Alt="@cue.Name" />
+                        <span class="cue-media-tag">
+                            <span class="cue-media-tag-dot is-gold"></span>
+                            Đang bán
+                        </span>
+                        @if (!string.IsNullOrWhiteSpace(cue.Category))
+                        {
+                            <span class="cue-media-spec">@cue.Category</span>
+                        }
+                    </div>
+                    <div class="cue-body">
+                        <div class="cue-eyebrow-row">
+                            <span class="cue-eyebrow">@(string.IsNullOrWhiteSpace(cue.Brand) ? "Cửa hàng" : cue.Brand)</span>
+                            <span class="cue-eyebrow-right">Mua bán</span>
+                        </div>
+                        <h3 class="cue-title">@cue.Name</h3>
+                        @if (!string.IsNullOrWhiteSpace(cue.Description))
+                        {
+                            <p class="tcard-sub">@cue.Description</p>
+                        }
+                        <div class="cue-price-row">
+                            <div class="cue-price">
+                                <span class="cue-price-value is-sale">@(cue.SalePrice?.ToString("N0") ?? "—")đ</span>
+                            </div>
+                            <button class="cue-btn cue-btn-buy" @onclick="() => OpenPurchaseModal(cue)" @onclick:stopPropagation="true">
+                                <span>Đặt mua</span>
+                                <Icon Name="cart" Size="16" />
+                            </button>
+                        </div>
+                        @if (AuthState.IsPlayer)
+                        {
+                            <button class="cue-btn cue-btn-buy cue-wallet-btn" @onclick="() => PayWithWallet(cue)" @onclick:stopPropagation="true">
+                                <Icon Name="wallet" Size="16" /> Thanh toán bằng Ví
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+else if (_tab == Tab.Trade)
+{
+    <div class="form-actions" style="margin-bottom:1rem;">
+        <button class="btn btn-primary btn-sm" @onclick="OpenListingModal"><Icon Name="add" Size="16" /> Đăng tin trao đổi</button>
+    </div>
+
+    var listings = _listings.Where(l => MatchesSearch(l.Title, l.DesiredTrade, l.SellerName)).ToList();
+    @if (listings.Count == 0)
+    {
+        <p class="page-empty">Chợ trao đổi chưa có tin nào.</p>
+    }
+    else
+    {
+        @* Đợt 16: card tin trao đổi cùng mẫu card cơ Stitch. *@
+        <div class="cue-grid">
+            @foreach (var listing in listings)
+            {
+                <div class="cue-card">
+                    <div class="cue-media">
+                        @if (!string.IsNullOrEmpty(listing.ImageUrl))
+                        {
+                            <img src="@listing.ImageUrl" alt="@listing.Title" />
+                        }
+                        else
+                        {
+                            <Icon Name="swap_horiz" Size="40" />
+                        }
+                        <span class="cue-media-tag">
+                            <span class="cue-media-tag-dot @(listing.Price is null ? "" : "is-gold")"></span>
+                            @(listing.Price is null ? "Chỉ trao đổi" : "Bán / Trao đổi")
+                        </span>
+                        @if (!string.IsNullOrEmpty(listing.DesiredTrade))
+                        {
+                            <span class="cue-media-spec">Muốn đổi: @listing.DesiredTrade</span>
+                        }
+                    </div>
+                    <div class="cue-body">
+                        <div class="cue-eyebrow-row">
+                            <span class="cue-eyebrow">@listing.SellerName</span>
+                            <span class="cue-eyebrow-right">@listing.CreatedAtUtc.ToLocalTime().ToString("dd/MM")</span>
+                        </div>
+                        <h3 class="cue-title">@listing.Title</h3>
+                        @if (!string.IsNullOrWhiteSpace(listing.Description))
+                        {
+                            <p class="tcard-sub">@listing.Description</p>
+                        }
+                        <div class="cue-price-row">
+                            <div class="cue-price">
+                                <span class="cue-price-value is-sale">@(listing.Price is null ? "Trao đổi" : listing.Price.Value.ToString("N0") + "đ")</span>
+                            </div>
+                            @if (!string.IsNullOrEmpty(listing.SellerPhoneNumber))
+                            {
+                                <a class="cue-btn cue-btn-buy" href="tel:@listing.SellerPhoneNumber"><span>Liên hệ</span><Icon Name="call" Size="16" /></a>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+
+@if (!string.IsNullOrEmpty(_message))
+{
+    <p class="toast-msg" @key="_message" role="status">@_message</p>
+}
+
+@if (_detailCue is not null)
+{
+    <div class="modal-overlay" @onclick="CloseCueDetail">
+        <div class="modal-card" @onclick:stopPropagation="true">
+            <ProductImage Url="@_detailCue.ImageUrl" FallbackBase="@ProductImages.ForCue(_detailCue.Name, _detailCue.Brand, _detailCue.Category)"
+                          Alt="@_detailCue.Name" Class="cue-detail-image" Sizes="(max-width: 600px) 100vw, 640px" Eager="true" />
+            <h2>@_detailCue.Name</h2>
+            @if (!string.IsNullOrWhiteSpace(_detailCue.Brand))
+            {
+                <p class="table-meta">Hãng: @_detailCue.Brand</p>
+            }
+            <p class="table-meta">@(_detailCue.Description ?? "Chưa có mô tả.")</p>
+            @if (_detailCue.IsForSale)
+            {
+                <p class="table-meta">Giá bán: @(_detailCue.SalePrice?.ToString("N0") ?? "—") đ</p>
+            }
+            else
+            {
+                <p class="table-meta">Giá thuê: @_detailCue.PricePerHour.ToString("N0") đ/giờ — còn @_detailCue.AvailableCount cây</p>
+            }
+            <div class="form-actions">
+                <button class="btn btn-ghost" @onclick="CloseCueDetail">Đóng</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_purchaseModalCue is not null)
+{
+    <div class="modal-overlay" @onclick="ClosePurchaseModal">
+        <div class="modal-card" @onclick:stopPropagation="true">
+            <h2>Yêu cầu mua @_purchaseModalCue.Name</h2>
+            <div class="form-field">
+                <label>Họ tên</label>
+                <input class="input" @bind="_purchaseName" />
+            </div>
+            <div class="form-field">
+                <label>Số điện thoại</label>
+                <input class="input" @bind="_purchasePhone" placeholder="09xxxxxxxx" />
+            </div>
+            @if (!string.IsNullOrEmpty(_purchaseError))
+            {
+                <p class="error-text">@_purchaseError</p>
+            }
+            <div class="form-actions">
+                <button class="btn btn-primary" @onclick="SubmitPurchase">Gửi yêu cầu</button>
+                <button class="btn btn-ghost" @onclick="ClosePurchaseModal">Hủy</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_listingModalOpen)
+{
+    <div class="modal-overlay" @onclick="CloseListingModal">
+        <div class="modal-card" @onclick:stopPropagation="true">
+            <h2>Đăng tin trao đổi</h2>
+            <div class="form-field">
+                <label>Tiêu đề</label>
+                <input class="input" @bind="_listingForm.Title" />
+            </div>
+            <div class="form-field">
+                <label>Mô tả</label>
+                <textarea class="input" rows="2" @bind="_listingForm.Description"></textarea>
+            </div>
+            <div class="form-field">
+                <label>Muốn đổi lấy gì (tùy chọn)</label>
+                <input class="input" @bind="_listingForm.DesiredTrade" />
+            </div>
+            <div class="form-field">
+                <label>Giá (tùy chọn, để trống nếu chỉ trade)</label>
+                <input class="input" type="number" @bind="_listingForm.Price" />
+            </div>
+            <div class="form-field">
+                <label>Ảnh</label>
+                <InputFile OnChange="HandleListingImageSelected" accept=".png,.jpg,.jpeg,.gif,.webp" />
+                @if (!string.IsNullOrEmpty(_listingForm.ImageUrl))
+                {
+                    <img class="preview-image" src="@_listingForm.ImageUrl" alt="Ảnh" />
+                }
+            </div>
+            @if (!string.IsNullOrEmpty(_listingError))
+            {
+                <p class="error-text">@_listingError</p>
+            }
+            <div class="form-actions">
+                <button class="btn btn-primary" @onclick="SubmitListing">Đăng tin</button>
+                <button class="btn btn-ghost" @onclick="CloseListingModal">Hủy</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private enum Tab { Rent, Sale, Trade }
+
+    // Đợt 16: ô tìm kiếm trên trang Cơ (Stitch) - lọc tại chỗ theo tab đang mở.
+    private string _search = string.Empty;
+
+    private bool MatchesSearch(params string?[] fields)
+    {
+        var q = _search.Trim();
+        return q.Length == 0 || fields.Any(f => !string.IsNullOrEmpty(f) && f.Contains(q, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private string SearchPlaceholder => _tab switch
+    {
+        Tab.Sale => "Tìm cơ, phụ kiện đang bán, hãng...",
+        Tab.Trade => "Tìm tin trao đổi, người đăng...",
+        _ => "Tìm tên cơ, hãng, loại cơ cho thuê...",
+    };
+
+    private string PromoTitle => _tab switch
+    {
+        Tab.Sale => "Cơ & phụ kiện chính hãng",
+        Tab.Trade => "Chợ trao đổi giữa cơ thủ",
+        _ => "Thuê cơ tại bàn",
+    };
+
+    private string PromoText => _tab switch
+    {
+        Tab.Sale => "Gửi yêu cầu mua hoặc thanh toán ngay bằng Ví hội viên.",
+        Tab.Trade => "Đăng tin bán hoặc đổi cơ, liên hệ trực tiếp với người đăng.",
+        _ => "Tính tiền theo giờ, nhận và trả cơ ngay tại quầy của CLB.",
+    };
+
+    private string PromoIcon => _tab switch
+    {
+        Tab.Sale => "shopping_bag",
+        Tab.Trade => "swap_horiz",
+        _ => "lock_reset",
+    };
+
+    private List<CueDto> _cues = new();
+    private List<CueListingDto> _listings = new();
+    private Tab _tab = Tab.Rent;
+    private bool _loading = true;
+    private string? _message;
+
+    private string? _saleCategory;
+    private string? _saleBrand;
+
+    private CueDto? _detailCue;
+    private CueDto? _purchaseModalCue;
+    private string _purchaseName = string.Empty;
+    private string _purchasePhone = string.Empty;
+    private string? _purchaseError;
+
+    private bool _listingModalOpen;
+    private ListingFormModel _listingForm = new();
+    private string? _listingError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _cues = await CueApiService.GetCuesAsync();
+        if (_tab == Tab.Trade)
+        {
+            _listings = await CueApiService.GetListingsAsync();
+        }
+        _loading = false;
+    }
+
+    private async Task SwitchTab(Tab tab)
+    {
+        _tab = tab;
+        if (tab == Tab.Trade)
+        {
+            _listings = await CueApiService.GetListingsAsync();
+        }
+    }
+
+    private Task SwitchToRent() => SwitchTab(Tab.Rent);
+    private Task SwitchToSale() => SwitchTab(Tab.Sale);
+    private Task SwitchToTrade() => SwitchTab(Tab.Trade);
+
+    private void SetSaleCategory(string? category) => _saleCategory = category;
+    private void SetSaleBrand(string? brand) => _saleBrand = brand;
+
+    private void OpenCueDetail(CueDto cue) => _detailCue = cue;
+    private void CloseCueDetail() => _detailCue = null;
+
+    private async Task Rent(int cueId)
+    {
+        if (!AuthState.IsAuthenticated)
+        {
+            _message = "Vui lòng đăng nhập để thuê cơ.";
+            NavigationManager.NavigateTo("/login");
+            return;
+        }
+
+        var (success, error) = await CueApiService.RentAsync(cueId, AuthState.FullName!);
+        _message = success ? "Thuê cơ thành công!" : error;
+        await LoadAsync();
+    }
+
+    private void OpenPurchaseModal(CueDto cue)
+    {
+        if (!AuthState.IsAuthenticated)
+        {
+            _message = "Vui lòng đăng nhập để mua cơ.";
+            NavigationManager.NavigateTo("/login");
+            return;
+        }
+
+        _purchaseModalCue = cue;
+        _purchaseName = AuthState.FullName ?? string.Empty;
+        _purchasePhone = string.Empty;
+        _purchaseError = null;
+    }
+
+    private void ClosePurchaseModal() => _purchaseModalCue = null;
+
+    private async Task PayWithWallet(CueDto cue)
+    {
+        if (!AuthState.IsAuthenticated)
+        {
+            _message = "Vui lòng đăng nhập để thanh toán bằng Ví.";
+            NavigationManager.NavigateTo("/login");
+            return;
+        }
+
+        if (cue.SalePrice is null)
+        {
+            _message = "Cơ này chưa có giá bán.";
+            return;
+        }
+
+        var (success, wallet, error) = await WalletApiService.PayWithWalletAsync(
+            cue.SalePrice.Value, "CuePurchase", cue.Id, $"Thanh toán mua {cue.Name} bằng Ví");
+
+        _message = success
+            ? $"Thanh toán thành công! Số dư Ví còn lại: {wallet!.WalletBalance:N0} đ."
+            : (error ?? "Thanh toán thất bại.");
+    }
+
+    private async Task SubmitPurchase()
+    {
+        if (_purchaseModalCue is null) return;
+
+        if (string.IsNullOrWhiteSpace(_purchasePhone))
+        {
+            _purchaseError = "Vui lòng nhập số điện thoại.";
+            return;
+        }
+
+        var (success, error) = await CueApiService.RequestPurchaseAsync(_purchaseModalCue.Id, _purchaseName, _purchasePhone);
+        if (success)
+        {
+            _message = "Đã gửi yêu cầu mua. Nhân viên sẽ liên hệ xác nhận.";
+            _purchaseModalCue = null;
+        }
+        else
+        {
+            _purchaseError = error;
+        }
+    }
+
+    private void OpenListingModal()
+    {
+        if (!AuthState.IsAuthenticated)
+        {
+            _message = "Vui lòng đăng nhập để đăng tin trao đổi.";
+            NavigationManager.NavigateTo("/login");
+            return;
+        }
+
+        _listingModalOpen = true;
+        _listingForm = new ListingFormModel();
+        _listingError = null;
+    }
+
+    private void CloseListingModal() => _listingModalOpen = false;
+
+    private async Task HandleListingImageSelected(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+
+        try
+        {
+            const long maxSize = 5 * 1024 * 1024;
+            await using var stream = file.OpenReadStream(maxSize);
+            using var memoryStream = new MemoryStream();
+            await stream.CopyToAsync(memoryStream);
+
+            var (success, url, error) = await CueApiService.UploadImageAsync(
+                memoryStream.ToArray(), file.Name, file.ContentType);
+
+            if (success)
+            {
+                _listingForm.ImageUrl = url;
+            }
+            else
+            {
+                _listingError = "Tải ảnh thất bại: " + error;
+            }
+        }
+        catch (Exception ex)
+        {
+            _listingError = "Tải ảnh thất bại: " + ex.Message;
+        }
+    }
+
+    private async Task SubmitListing()
+    {
+        if (string.IsNullOrWhiteSpace(_listingForm.Title))
+        {
+            _listingError = "Vui lòng nhập tiêu đề.";
+            return;
+        }
+
+        var (success, error) = await CueApiService.CreateListingAsync(
+            _listingForm.Title, _listingForm.Description, _listingForm.ImageUrl,
+            _listingForm.DesiredTrade, _listingForm.Price);
+
+        if (success)
+        {
+            _message = "Đã đăng tin trao đổi.";
+            _listingModalOpen = false;
+            _listings = await CueApiService.GetListingsAsync();
+        }
+        else
+        {
+            _listingError = error;
+        }
+    }
+
+    private class ListingFormModel
+    {
+        public string Title { get; set; } = string.Empty;
+        public string? Description { get; set; }
+        public string? DesiredTrade { get; set; }
+        public decimal? Price { get; set; }
+        public string? ImageUrl { get; set; }
+    }
+}

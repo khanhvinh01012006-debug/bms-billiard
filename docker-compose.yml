@@ -1,0 +1,75 @@
+# Chạy:  docker compose up -d --build   (cần file .env, xem .env.example và DEPLOY.md)
+name: bms
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: BMS.API/Dockerfile
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      # Nhận X-Forwarded-Proto từ Caddy để link ảnh upload là https://
+      ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+      TZ: Asia/Ho_Chi_Minh
+      Storage__DataDirectory: /data
+      Jwt__Key: ${JWT_KEY:?Chua dat JWT_KEY trong .env}
+      Admin__Email: ${ADMIN_EMAIL:-admin@bms.local}
+      Admin__InitialPassword: ${ADMIN_PASSWORD:?Chua dat ADMIN_PASSWORD trong .env}
+      Admin__ResetPasswordOnStartup: ${ADMIN_RESET_PASSWORD:-false}
+      Cors__AllowedOrigins: https://${PLAYER_DOMAIN},https://${ADMIN_DOMAIN}
+    volumes:
+      # bms.db + uploads/ nằm ở ./data trên VPS -> build lại không mất dữ liệu
+      - ./data:/data
+
+  admin:
+    build:
+      context: .
+      dockerfile: BMS.AdminStaffWeb/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+      TZ: Asia/Ho_Chi_Minh
+      Api__BaseUrl: https://${API_DOMAIN}
+      PlayerSite__Url: https://${PLAYER_DOMAIN}
+    volumes:
+      # Lưu khóa DataProtection (antiforgery, circuit) để build lại không làm hỏng phiên đang mở
+      - admin_keys:/root/.aspnet/DataProtection-Keys
+
+  caddy:
+    build:
+      context: .
+      dockerfile: BMS.PlayerWeb/Dockerfile
+      args:
+        API_BASE_URL: https://${API_DOMAIN}
+        STAFF_PORTAL_URL: https://${ADMIN_DOMAIN}
+    restart: unless-stopped
+    depends_on:
+      - api
+      - admin
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      PLAYER_DOMAIN: ${PLAYER_DOMAIN:?Chua dat PLAYER_DOMAIN trong .env}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN:?Chua dat ADMIN_DOMAIN trong .env}
+      API_DOMAIN: ${API_DOMAIN:?Chua dat API_DOMAIN trong .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      default:
+        # Admin Web (chạy phía server) gọi https://API_DOMAIN: phân giải thẳng tới Caddy
+        # trong mạng Docker, không phải đi vòng ra IP public của VPS.
+        aliases:
+          - ${API_DOMAIN}
+
+volumes:
+  admin_keys:
+  caddy_data:
+  caddy_config:

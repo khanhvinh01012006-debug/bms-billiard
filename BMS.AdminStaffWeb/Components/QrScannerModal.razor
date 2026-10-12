@@ -1,0 +1,105 @@
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+@* Hộp thoại quét mã QR (dùng wwwroot/js/qr-scanner.js): camera sau -> tự đọc mã; dự phòng chụp/
+   chọn ảnh mã QR hoặc dán mã bằng tay. Đọc được mã thì gọi OnCode(text). *@
+
+<div class="modal-overlay" @onclick="Close">
+    <div class="modal-card qr-scan-card" @onclick:stopPropagation="true">
+        <h2><Icon Name="qr_code_scanner" Size="20" /> @Title</h2>
+        <div class="qr-scan-video-wrap">
+            <video @ref="_video" class="qr-scan-video" playsinline muted aria-label="Hình camera để quét mã QR"></video>
+            <span class="qr-scan-frame" aria-hidden="true"></span>
+        </div>
+        <p class="hint-text">@(_status ?? "Đưa mã QR vào giữa khung hình.")</p>
+
+        <div class="form-field">
+            <label for="qr-photo">Hoặc chụp / chọn ảnh mã QR</label>
+            <input id="qr-photo" @ref="_fileInput" class="input" type="file" accept="image/*" capture="environment" @onchange="DecodePhoto" />
+        </div>
+        <div class="form-field">
+            <label for="qr-manual">Hoặc dán mã</label>
+            <div class="form-actions">
+                <input id="qr-manual" class="input" @bind="_manualCode" placeholder="BMS1...." />
+                <button class="btn btn-ghost btn-sm" @onclick="SubmitManual">Xác nhận mã</button>
+            </div>
+        </div>
+
+        <div class="form-actions">
+            <button class="btn btn-ghost" @onclick="Close">Đóng</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string Title { get; set; } = "Quét mã QR hội viên";
+    [Parameter] public EventCallback<string> OnCode { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private ElementReference _video;
+    private ElementReference _fileInput;
+    private DotNetObjectReference<QrScannerModal>? _self;
+    private string? _status;
+    private string? _manualCode;
+    private bool _done;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _self = DotNetObjectReference.Create(this);
+        _status = await JS.InvokeAsync<string?>("bmsQrScanner.start", _video, _self);
+        if (_status is not null) StateHasChanged();
+    }
+
+    [JSInvokable]
+    public async Task OnQrScanned(string text) => await Deliver(text);
+
+    private async Task DecodePhoto()
+    {
+        _status = "Đang đọc ảnh...";
+        var text = await JS.InvokeAsync<string?>("bmsQrScanner.decodeFile", _fileInput);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            _status = "Không tìm thấy mã QR trong ảnh. Hãy chụp lại rõ hơn.";
+            return;
+        }
+        await Deliver(text);
+    }
+
+    private async Task SubmitManual()
+    {
+        if (!string.IsNullOrWhiteSpace(_manualCode)) await Deliver(_manualCode.Trim());
+    }
+
+    private async Task Deliver(string text)
+    {
+        if (_done) return;
+        _done = true;
+        await StopCamera();
+        await InvokeAsync(() => OnCode.InvokeAsync(text));
+    }
+
+    private async Task Close()
+    {
+        await StopCamera();
+        await OnClose.InvokeAsync();
+    }
+
+    private async Task StopCamera()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("bmsQrScanner.stop");
+        }
+        catch (JSDisconnectedException)
+        {
+            // Mạch Blazor đã đóng (rời trang) - trình duyệt tự giải phóng camera.
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopCamera();
+        _self?.Dispose();
+    }
+}

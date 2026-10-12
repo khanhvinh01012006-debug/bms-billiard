@@ -1,0 +1,33 @@
+# --- Build / IDE ---
+bin/
+obj/
+.vs/
+.vscode/
+*.user
+*.suo
+*.rsuser
+.idea/
+node_modules/
+*.pdb
+
+# --- Sản phẩm đóng gói (tạo lại bằng deploy/build-windows.ps1) ---
+dist/
+*.tar.gz
+*.zip
+
+# --- Dữ liệu chạy thật / bí mật: KHÔNG đưa lên ---
+.env
+data/
+backups/
+App_Data/
+BMS.API/bms.db
+**/bms.db-shm
+**/bms.db-wal
+BMS.API/wwwroot/uploads/
+
+# Dữ liệu mẫu cho lần chạy đầu thì GIỮ (Docker và bản Windows cần):
+!deploy/seed/bms-demo.db
+
+# --- Hệ điều hành ---
+Thumbs.db
+.DS_Store

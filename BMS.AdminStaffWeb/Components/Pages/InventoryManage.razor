@@ -1,0 +1,600 @@
+@page "/inventory/manage"
+@rendermode InteractiveServer
+@inject InventoryApiService InventoryApiService
+@inject AuthState AuthState
+
+<h1><Icon Name="box" Size="22" /> Quản lý Kho</h1>
+
+@if (!AuthState.IsAdmin)
+{
+    <p class="page-empty">Bạn không có quyền truy cập trang này. Vui lòng đăng nhập bằng tài khoản Admin.</p>
+}
+else
+{
+    <div class="tabs">
+        <button class="tab-btn @(_activeTab == "list" ? "tab-btn-active" : "")" @onclick="SetTabList">Danh sách vật tư</button>
+        <button class="tab-btn @(_activeTab == "stockin" ? "tab-btn-active" : "")" @onclick="SetTabStockIn">Phiếu nhập hàng</button>
+        <button class="tab-btn @(_activeTab == "audit" ? "tab-btn-active" : "")" @onclick="SetTabAudit">Phiếu kiểm kho</button>
+    </div>
+
+    @if (_activeTab == "list")
+    {
+        @* Đợt 16: 2 cột trên desktop (form trái, danh sách phải) - trước đây form rộng 480px và
+           danh sách nằm bên dưới nên nửa phải màn hình bị trống. *@
+        <div class="inv-layout">
+        <div class="card form-card">
+            <h2>@(_editingId is null ? "Thêm vật tư mới" : $"Sửa vật tư #{_editingId}")</h2>
+
+            <div class="form-field">
+                <label>Tên vật tư</label>
+                <input class="input" @bind="_form.Name" />
+            </div>
+            <div class="form-field">
+                <label>Danh mục</label>
+                <SearchSelect @bind-Value="_form.Category" Options="CategoryOptions" Placeholder="Gõ để tìm hoặc bấm mũi tên để chọn..." />
+            </div>
+            <div class="form-field">
+                <label>Đơn vị tính</label>
+                <input class="input" @bind="_form.Unit" placeholder="cái / chai / hộp..." />
+            </div>
+            <div class="form-field">
+                <label>Số lượng</label>
+                <input class="input" type="number" @bind="_form.Quantity" />
+            </div>
+            <div class="form-field">
+                <label>Ngưỡng cảnh báo hết hàng</label>
+                <input class="input" type="number" @bind="_form.LowStockThreshold" />
+            </div>
+            <div class="form-field">
+                <label>Đơn giá (đ, tùy chọn)</label>
+                <input class="input" type="number" @bind="_form.UnitPrice" />
+            </div>
+            <div class="form-field">
+                <label>Hình ảnh</label>
+                <InputFile OnChange="HandleFileSelected" accept=".png,.jpg,.jpeg,.gif,.svg,.webp" />
+                @if (!string.IsNullOrEmpty(_form.ImageUrl))
+                {
+                    <img src="@_form.ImageUrl" alt="Ảnh vật tư" class="preview-image" />
+                }
+            </div>
+            <div class="form-field">
+                <label>Ghi chú</label>
+                <textarea class="input" rows="2" @bind="_form.Note"></textarea>
+            </div>
+
+            <div class="form-actions">
+                <button class="btn btn-primary" @onclick="Save">@(_editingId is null ? "Thêm" : "Lưu")</button>
+                @if (_editingId is not null)
+                {
+                    <button class="btn btn-ghost" @onclick="ResetForm">Hủy</button>
+                }
+            </div>
+
+            @if (!string.IsNullOrEmpty(_message))
+            {
+                <p class="hint-text">@_message</p>
+            }
+        </div>
+
+        <div class="section inv-list">
+            <h2>Danh sách vật tư trong kho</h2>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Tên</th>
+                        <th>Danh mục</th>
+                        <th>Số lượng</th>
+                        <th>Đơn vị</th>
+                        <th>Đơn giá</th>
+                        <th>Xử lý</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in _items)
+                    {
+                        <tr class="@(item.IsLowStock ? "row-low-stock" : "")">
+                            <td>
+                                <span class="inv-name">
+                                    <ProductImage Url="@item.ImageUrl" FallbackBase="@ProductImages.ForFnb(item.Name, item.Category)" Alt="@item.Name"
+                                                  Class="inv-thumb" Small="160" Large="320" Width="48" Height="36" Sizes="48px" />
+                                    <span>@item.Name</span>
+                                </span>
+                            </td>
+                            <td>@item.Category</td>
+                            <td>
+                                @item.Quantity
+                                @if (item.IsLowStock)
+                                {
+                                    <span class="badge badge-low-stock">Sắp hết</span>
+                                }
+                            </td>
+                            <td>@item.Unit</td>
+                            <td>@(item.UnitPrice?.ToString("N0") ?? "—")</td>
+                            <td class="row-actions">
+                                <button class="btn btn-ghost btn-sm" @onclick="() => AdjustDown(item.Id)">-1</button>
+                                <button class="btn btn-ghost btn-sm" @onclick="() => AdjustUp(item.Id)">+1</button>
+                                <button class="btn btn-ghost btn-sm" @onclick="() => Edit(item)">Sửa</button>
+                                <button class="btn btn-danger btn-sm" @onclick="() => Delete(item.Id)">Xóa</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        </div>
+    }
+    else if (_activeTab == "stockin")
+    {
+        <div class="card form-card">
+            <h2>Tạo phiếu nhập hàng mới</h2>
+
+            <div class="form-field">
+                <label>Nhà cung cấp (tùy chọn)</label>
+                <input class="input" @bind="_stockInSupplier" />
+            </div>
+            <div class="form-field">
+                <label>Ghi chú (tùy chọn)</label>
+                <textarea class="input" rows="2" @bind="_stockInNote"></textarea>
+            </div>
+
+            <div class="section">
+                <h2>Các dòng vật tư</h2>
+                @foreach (var line in _stockInLines)
+                {
+                    <div class="stock-line-row">
+                        <select class="input" @bind="line.InventoryItemId">
+                            @foreach (var item in _items)
+                            {
+                                <option value="@item.Id">@item.Name (@item.Unit)</option>
+                            }
+                        </select>
+                        <input class="input" @bind="line.PurchaseUnit" placeholder="thùng/lốc..." />
+                        <input class="input" type="number" @bind="line.PurchaseQuantity" placeholder="SL nhập" />
+                        <input class="input" type="number" @bind="line.ConversionFactor" placeholder="Hệ số quy đổi" />
+                        <input class="input" type="number" @bind="line.UnitCost" placeholder="Giá nhập (tùy chọn)" />
+                        <button class="btn btn-danger btn-sm" @onclick="() => RemoveStockInLine(line)">Xóa dòng</button>
+                    </div>
+                }
+                <button class="btn btn-ghost btn-sm" @onclick="AddStockInLine">+ Thêm dòng</button>
+            </div>
+
+            <div class="form-actions">
+                <button class="btn btn-primary" @onclick="SaveStockIn">Lưu phiếu nhập</button>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_stockInMessage))
+            {
+                <p class="hint-text">@_stockInMessage</p>
+            }
+        </div>
+
+        <div class="section">
+            <h2>Lịch sử phiếu nhập hàng</h2>
+            @if (_stockInHistory.Count == 0)
+            {
+                <p class="page-empty">Chưa có phiếu nhập hàng nào.</p>
+            }
+            else
+            {
+                @foreach (var stockIn in _stockInHistory)
+                {
+                    <div class="card">
+                        <div class="table-card-header">
+                            <span class="table-name">@stockIn.CreatedAtUtc.ToLocalTime().ToString("HH:mm dd/MM/yyyy")</span>
+                            <span class="badge">@stockIn.StaffName</span>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(stockIn.SupplierName))
+                        {
+                            <div class="table-meta">Nhà cung cấp: @stockIn.SupplierName</div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(stockIn.Note))
+                        {
+                            <div class="table-meta">Ghi chú: @stockIn.Note</div>
+                        }
+                        <ul>
+                            @foreach (var line in stockIn.Lines)
+                            {
+                                <li>@line.InventoryItemName x @line.PurchaseQuantity @line.PurchaseUnit = +@line.BaseUnitsAdded vào kho</li>
+                            }
+                        </ul>
+                    </div>
+                }
+            }
+        </div>
+    }
+    else if (_activeTab == "audit")
+    {
+        <div class="card form-card">
+            <div class="form-actions">
+                <button class="btn btn-primary" @onclick="CreateNewAudit">+ Tạo phiếu kiểm kho mới</button>
+            </div>
+            @if (!string.IsNullOrEmpty(_auditMessage))
+            {
+                <p class="hint-text">@_auditMessage</p>
+            }
+        </div>
+
+        @if (_openAudit is not null)
+        {
+            <div class="card form-card">
+                <h2>Phiếu kiểm kho #@_openAudit.Id - @AuditStatusLabel(_openAudit.Status)</h2>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Tên vật tư</th>
+                            <th>Đơn vị</th>
+                            <th>SL hệ thống</th>
+                            <th>SL thực tế</th>
+                            <th>Lệch</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var line in _openAudit.Lines)
+                        {
+                            var actual = _actualQuantityByLineId[line.Id];
+                            var discrepancy = actual is null ? (int?)null : actual.Value - line.SystemQuantity;
+                            <tr>
+                                <td>@line.InventoryItemName</td>
+                                <td>@line.Unit</td>
+                                <td>@line.SystemQuantity</td>
+                                <td>
+                                    <input class="input" type="number"
+                                           @bind="_actualQuantityByLineId[line.Id]"
+                                           @bind:after="() => SaveAuditLine(line.Id)" />
+                                </td>
+                                <td class="@(discrepancy is null ? "" : discrepancy == 0 ? "text-success" : "text-danger")">
+                                    @(discrepancy?.ToString() ?? "")
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                <div class="form-actions">
+                    <button class="btn btn-primary" @onclick="CompleteAudit">Hoàn tất kiểm kho</button>
+                    <button class="btn btn-ghost" @onclick="CloseAudit">Đóng</button>
+                </div>
+            </div>
+        }
+
+        <div class="section">
+            <h2>Các phiếu kiểm kho trước đó</h2>
+            @if (_stockAudits.Count == 0)
+            {
+                <p class="page-empty">Chưa có phiếu kiểm kho nào.</p>
+            }
+            else
+            {
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Mã phiếu</th>
+                            <th>Trạng thái</th>
+                            <th>Ngày tạo</th>
+                            <th>Ngày hoàn tất</th>
+                            <th>Người tạo</th>
+                            <th>Xử lý</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var audit in _stockAudits)
+                        {
+                            <tr>
+                                <td>#@audit.Id</td>
+                                <td><span class="badge">@AuditStatusLabel(audit.Status)</span></td>
+                                <td>@audit.CreatedAtUtc.ToLocalTime().ToString("HH:mm dd/MM/yyyy")</td>
+                                <td>@(audit.CompletedAtUtc?.ToLocalTime().ToString("HH:mm dd/MM/yyyy") ?? "—")</td>
+                                <td>@audit.StaffName</td>
+                                <td class="row-actions">
+                                    @if (audit.Status == "Draft")
+                                    {
+                                        <button class="btn btn-ghost btn-sm" @onclick="() => OpenAudit(audit.Id)">Mở tiếp</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    }
+}
+
+@code {
+    private static string AuditStatusLabel(string status) => status switch
+    {
+        "Draft" => "Đang kiểm",
+        "Completed" => "Đã hoàn tất",
+        _ => status
+    };
+
+    private List<InventoryItemDto> _items = new();
+
+    // Đợt 16: danh mục chọn bằng ô tìm kiếm + mũi tên xổ xuống. Danh mục gốc là các nhóm
+    // hàng BÁN được (đồ ăn/đồ uống...) - phụ kiện/vật tư miễn phí kèm bàn (phấn, đầu cơ, bi,
+    // dung dịch vệ sinh) không còn quản lý như hàng bán. Danh mục đang dùng trong kho vẫn
+    // được gợi ý thêm để không mất dữ liệu cũ.
+    private static readonly string[] BaseCategories = { "Đồ uống", "Đồ ăn", "Cà phê & Trà", "Bia & Nước có cồn", "Thuốc lá", "Khác" };
+
+    private IEnumerable<string> CategoryOptions =>
+        BaseCategories
+            .Concat(_items.Select(i => i.Category).Where(c => !string.IsNullOrWhiteSpace(c)))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+    private InventoryFormModel _form = new();
+    private int? _editingId;
+    private string? _message;
+
+    private string _activeTab = "list";
+
+    // Phiếu nhập hàng.
+    private List<StockInLineForm> _stockInLines = new();
+    private string? _stockInSupplier;
+    private string? _stockInNote;
+    private List<StockInDto> _stockInHistory = new();
+    private string? _stockInMessage;
+
+    // Phiếu kiểm kho - seed key trước khi bất kỳ @bind nào tham chiếu tới nó (tránh
+    // KeyNotFoundException khi render).
+    private List<StockAuditDto> _stockAudits = new();
+    private int? _openAuditId;
+    private StockAuditDto? _openAudit;
+    private readonly Dictionary<int, int?> _actualQuantityByLineId = new();
+    private string? _auditMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState.IsAdmin)
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _items = await InventoryApiService.GetItemsAsync();
+    }
+
+    private async Task SetTab(string tab)
+    {
+        _activeTab = tab;
+        if (tab == "stockin")
+        {
+            _stockInHistory = await InventoryApiService.GetStockInHistoryAsync();
+        }
+        else if (tab == "audit")
+        {
+            _stockAudits = await InventoryApiService.GetStockAuditsAsync();
+        }
+    }
+
+    private Task SetTabList() => SetTab("list");
+    private Task SetTabStockIn() => SetTab("stockin");
+    private Task SetTabAudit() => SetTab("audit");
+
+    private void Edit(InventoryItemDto item)
+    {
+        _editingId = item.Id;
+        _form = new InventoryFormModel
+        {
+            Name = item.Name,
+            Category = item.Category,
+            Unit = item.Unit,
+            Quantity = item.Quantity,
+            LowStockThreshold = item.LowStockThreshold,
+            UnitPrice = item.UnitPrice,
+            ImageUrl = item.ImageUrl,
+            Note = item.Note
+        };
+    }
+
+    private void ResetForm()
+    {
+        _editingId = null;
+        _form = new InventoryFormModel();
+    }
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+
+        _message = "Đang tải ảnh lên...";
+        try
+        {
+            const long maxSize = 5 * 1024 * 1024;
+            await using var stream = file.OpenReadStream(maxSize);
+            using var memoryStream = new MemoryStream();
+            await stream.CopyToAsync(memoryStream);
+
+            var (success, url, error) = await InventoryApiService.UploadImageAsync(
+                memoryStream.ToArray(), file.Name, file.ContentType);
+
+            if (success)
+            {
+                _form.ImageUrl = url;
+                _message = "Đã tải ảnh lên (chỉ mới ở bộ nhớ tạm) — bấm nút \"Lưu\" bên dưới để áp dụng vào vật tư, nếu không ảnh sẽ KHÔNG được lưu.";
+            }
+            else
+            {
+                _message = "Tải ảnh thất bại: " + error;
+            }
+        }
+        catch (Exception ex)
+        {
+            _message = "Tải ảnh thất bại: " + ex.Message +
+                " (Nếu là lỗi kết nối/chứng chỉ HTTPS, hãy chạy 'dotnet dev-certs https --trust' rồi khởi động lại.)";
+        }
+    }
+
+    private async Task Save()
+    {
+        var request = new UpsertInventoryItemRequestDto(
+            _form.Name, _form.Category, _form.Unit, _form.Quantity, _form.LowStockThreshold,
+            _form.UnitPrice, _form.ImageUrl, _form.Note);
+
+        var (success, error) = _editingId is null
+            ? await InventoryApiService.CreateItemAsync(request)
+            : await InventoryApiService.UpdateItemAsync(_editingId.Value, request);
+
+        _message = success ? "Đã lưu." : error;
+
+        if (success)
+        {
+            ResetForm();
+            await LoadAsync();
+        }
+    }
+
+    private async Task Delete(int id)
+    {
+        var (success, error) = await InventoryApiService.DeleteItemAsync(id);
+        _message = success ? "Đã xóa." : error;
+        await LoadAsync();
+    }
+
+    private async Task Adjust(int id, int delta)
+    {
+        var (success, error) = await InventoryApiService.AdjustQuantityAsync(id, delta, null);
+        _message = success ? "Đã cập nhật số lượng." : error;
+        await LoadAsync();
+    }
+
+    private Task AdjustUp(int id) => Adjust(id, 1);
+    private Task AdjustDown(int id) => Adjust(id, -1);
+
+    // ===== Phiếu nhập hàng =====
+
+    private void AddStockInLine()
+    {
+        _stockInLines.Add(new StockInLineForm
+        {
+            InventoryItemId = _items.FirstOrDefault()?.Id ?? 0,
+            PurchaseUnit = string.Empty,
+            PurchaseQuantity = 1,
+            ConversionFactor = 1,
+            UnitCost = null
+        });
+    }
+
+    private void RemoveStockInLine(StockInLineForm line)
+    {
+        _stockInLines.Remove(line);
+    }
+
+    private async Task SaveStockIn()
+    {
+        if (_stockInLines.Count == 0)
+        {
+            _stockInMessage = "Vui lòng thêm ít nhất một dòng vật tư.";
+            return;
+        }
+
+        var request = new CreateStockInRequestDto(
+            _stockInSupplier,
+            _stockInNote,
+            _stockInLines.Select(l => new CreateStockInLineRequestDto(
+                l.InventoryItemId, l.PurchaseUnit, l.PurchaseQuantity, l.ConversionFactor, l.UnitCost)).ToList());
+
+        var (success, _, error) = await InventoryApiService.CreateStockInAsync(request);
+        _stockInMessage = success ? "Đã lưu phiếu nhập hàng." : error;
+
+        if (success)
+        {
+            _stockInLines = new List<StockInLineForm>();
+            _stockInSupplier = null;
+            _stockInNote = null;
+            await LoadAsync();
+            _stockInHistory = await InventoryApiService.GetStockInHistoryAsync();
+        }
+    }
+
+    // ===== Phiếu kiểm kho =====
+
+    private async Task CreateNewAudit()
+    {
+        var (success, result, error) = await InventoryApiService.CreateStockAuditAsync(null);
+        if (success && result is not null)
+        {
+            _stockAudits = await InventoryApiService.GetStockAuditsAsync();
+            await OpenAudit(result.Id);
+        }
+        else
+        {
+            _auditMessage = error;
+        }
+    }
+
+    private async Task OpenAudit(int id)
+    {
+        var audit = await InventoryApiService.GetStockAuditByIdAsync(id);
+        if (audit is null)
+        {
+            _auditMessage = "Không tìm thấy phiếu kiểm kho.";
+            return;
+        }
+
+        // Seed key trước khi bất kỳ @bind nào tham chiếu tới nó.
+        foreach (var line in audit.Lines)
+        {
+            _actualQuantityByLineId[line.Id] = line.ActualQuantity;
+        }
+
+        _openAuditId = id;
+        _openAudit = audit;
+    }
+
+    private void CloseAudit()
+    {
+        _openAuditId = null;
+        _openAudit = null;
+    }
+
+    private async Task SaveAuditLine(int lineId)
+    {
+        if (_openAuditId is null) return;
+
+        var actual = _actualQuantityByLineId[lineId];
+        if (actual is null) return;
+
+        var (success, error) = await InventoryApiService.UpdateStockAuditLineAsync(_openAuditId.Value, lineId, actual.Value);
+        _auditMessage = success ? null : error;
+    }
+
+    private async Task CompleteAudit()
+    {
+        if (_openAuditId is null) return;
+
+        var (success, _, error) = await InventoryApiService.CompleteStockAuditAsync(_openAuditId.Value);
+        if (success)
+        {
+            _auditMessage = "Đã hoàn tất kiểm kho, tồn kho đã được cập nhật.";
+            CloseAudit();
+            await LoadAsync();
+            _stockAudits = await InventoryApiService.GetStockAuditsAsync();
+        }
+        else
+        {
+            _auditMessage = error;
+        }
+    }
+
+    private class InventoryFormModel
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Category { get; set; } = string.Empty;
+        public string Unit { get; set; } = string.Empty;
+        public int Quantity { get; set; }
+        public int LowStockThreshold { get; set; } = 5;
+        public decimal? UnitPrice { get; set; }
+        public string? ImageUrl { get; set; }
+        public string? Note { get; set; }
+    }
+
+    private class StockInLineForm
+    {
+        public int InventoryItemId { get; set; }
+        public string PurchaseUnit { get; set; } = string.Empty;
+        public int PurchaseQuantity { get; set; } = 1;
+        public int ConversionFactor { get; set; } = 1;
+        public decimal? UnitCost { get; set; }
+    }
+}

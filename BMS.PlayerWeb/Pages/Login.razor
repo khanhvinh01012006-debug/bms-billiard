@@ -1,0 +1,124 @@
+@page "/login"
+@inject AccountApiService AccountApiService
+@inject AuthState AuthState
+@inject AuthStorageService AuthStorage
+@inject NavigationManager NavigationManager
+@inject IConfiguration Configuration
+
+<div class="login-page">
+    <div class="login-icon">
+        <img src="images/logo-mark.svg" alt="" />
+    </div>
+    <h1 class="login-title">Đăng nhập</h1>
+    <p class="login-subtitle">Đăng nhập để đặt bàn, thuê cơ và ghép trận nhanh hơn</p>
+
+    <div class="login-form-card">
+        <EditForm Model="_model" OnValidSubmit="HandleLogin">
+            <div class="form-field">
+                <label for="email">Email</label>
+                <div class="input-icon-wrap">
+                    <span class="input-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M3 5h18v14H3V5Z" stroke="currentColor" stroke-width="1.6" />
+                            <path d="m3 6 9 7 9-7" stroke="currentColor" stroke-width="1.6" />
+                        </svg>
+                    </span>
+                    <InputText id="email" @bind-Value="_model.Email" class="input" placeholder="ban@example.com" />
+                </div>
+            </div>
+            <div class="form-field">
+                <label for="password">Mật khẩu</label>
+                <div class="input-icon-wrap">
+                    <span class="input-icon">
+                        <svg width="14" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="4" y="10" width="16" height="10" rx="2" stroke="currentColor" stroke-width="1.6" />
+                            <path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="1.6" />
+                        </svg>
+                    </span>
+                    <InputText id="password" type="@(_showPassword ? "text" : "password")" @bind-Value="_model.Password" class="input" placeholder="••••••" />
+                    <button type="button" class="input-icon-toggle" @onclick="TogglePassword" tabindex="-1">
+                        @(_showPassword ? "Ẩn" : "Hiện")
+                    </button>
+                </div>
+            </div>
+
+            <label class="checkbox-row">
+                <input type="checkbox" @bind="_rememberMe" />
+                <span>Ghi nhớ đăng nhập</span>
+            </label>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <p class="error-text">@_error</p>
+            }
+            @if (_wrongPortal)
+            {
+                <p class="hint-text">Nhân viên vui lòng đăng nhập tại <a href="@StaffPortalUrl">cổng nhân viên</a>.</p>
+            }
+
+            <button type="submit" class="btn btn-primary btn-block" disabled="@_busy">
+                @(_busy ? "Đang đăng nhập..." : "Đăng nhập")
+            </button>
+        </EditForm>
+
+        <p class="auth-switch">Chưa có tài khoản? <a href="register">Đăng ký ngay</a></p>
+        <p class="auth-switch"><a href="forgot-password">Quên mật khẩu?</a></p>
+    </div>
+</div>
+
+@code {
+    private LoginModel _model = new();
+    private string? _error;
+    private bool _busy;
+    private bool _showPassword;
+    // Mặc định bật sẵn: hầu hết người dùng đều mong đợi vẫn đăng nhập sau khi đóng trình
+    // duyệt trừ khi họ chủ động bỏ chọn (ví dụ dùng máy tính chung).
+    private bool _rememberMe = true;
+
+    private bool _wrongPortal;
+
+    private string StaffPortalUrl => Configuration["StaffPortal:Url"] ?? "https://localhost:5101";
+
+    private async Task HandleLogin()
+    {
+        _busy = true;
+        _error = null;
+        _wrongPortal = false;
+
+        var (success, result, error) = await AccountApiService.LoginAsync(_model.Email, _model.Password);
+
+        _busy = false;
+
+        if (success && result is not null)
+        {
+            // Trang khách chỉ dành cho Người chơi; Nhân viên/Admin dùng cổng nhân viên.
+            if (!string.Equals(result.Role, "Player", StringComparison.OrdinalIgnoreCase))
+            {
+                AuthState.SignOut();
+                await AuthStorage.ClearAsync();
+                _error = "Tài khoản này không dùng được ở trang dành cho khách.";
+                _wrongPortal = true;
+                return;
+            }
+
+            AuthState.SignIn(result.Token, result.Role, result.FullName);
+            await AuthStorage.SaveAsync(result.Token, result.Role, result.FullName, _rememberMe);
+            NavigationManager.NavigateTo("/");
+        }
+        else
+        {
+            _error = error ?? "Đăng nhập thất bại.";
+        }
+    }
+
+    private void TogglePassword()
+    {
+        _showPassword = !_showPassword;
+    }
+
+    private class LoginModel
+    {
+        public string Email { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+    }
+}
