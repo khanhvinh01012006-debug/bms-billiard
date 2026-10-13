@@ -2,7 +2,7 @@
 
 > **Bản đang chạy:** Người chơi https://bmsbilliard.com · Nhân viên/Quản trị https://admin.bmsbilliard.com · API https://api.bmsbilliard.com
 >
-> **Tài liệu:** [Hướng dẫn chạy đồ án](HUONG-DAN-CHAY-DO-AN.md) · [Triển khai VPS](DEPLOY.md) · [Đặc tả yêu cầu (SRS)](docs/SRS.md) · [Bảo mật API bằng JWT](docs/BAO-MAT-JWT.md)
+> **Tài liệu:** [Hướng dẫn chạy đồ án](HUONG-DAN-CHAY-DO-AN.md) · [Triển khai VPS](DEPLOY.md) · [Đặc tả yêu cầu (SRS)](docs/SRS.md) · [Bảo mật API bằng JWT](docs/BAO-MAT-JWT.md) · [Hỏi đáp bảo vệ](docs/HOI-DAP-BAO-VE.md)
 >
 > **Jira:** https://billiardsclub.atlassian.net/jira/software/projects/BMS/boards/2/backlog
 

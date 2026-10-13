@@ -157,7 +157,7 @@ Quy ước cột **Jira**: mã story trên Jira. **TT** = trạng thái hiện t
 |---|---|---|---|---|---|
 | FR-20 | Tạo hóa đơn khi trả bàn | Nhân viên | Hóa đơn gồm thời gian chơi, tiền giờ, tiền món, phụ thu (kèm lý do), giảm giá, tổng cộng | BMS-22 | ✅ |
 | FR-21 | Tính tiền giờ | Hệ thống | Theo khung giờ giá của loại bàn tính theo **giờ Việt Nam**; không có khung thì theo giá/giờ của bàn; **làm tròn tới 1.000đ gần nhất** | BMS-23, BMS-233 | ✅ |
-| FR-22 | Thêm món vào hóa đơn | Nhân viên | Chọn món từ kho (ảnh, giá, tồn), số lượng; trừ tồn kho; xóa món đã gọi; thêm dịch vụ nhập tay | BMS-24 | ✅ |
+| FR-22 | Thêm món vào hóa đơn | Nhân viên | Chọn món từ kho (ảnh, giá, tồn), số lượng; tên và giá lấy từ kho (không tin giá client gửi); xóa món đã gọi; thêm dịch vụ nhập tay. **Chưa tự trừ tồn kho khi gọi món** (xem mục 9) | BMS-24 | ✅ |
 | FR-23 | Thanh toán | Nhân viên | 3 phương thức: Thẻ hội viên (Ví), Chuyển khoản (VietQR), Tiền mặt (tính tiền thối); Ví không đủ thì báo thiếu | BMS-25 | ✅ |
 | FR-24 | Chuyển khoản VietQR | Nhân viên | Tạo mã VietQR có sẵn số tiền + nội dung theo tài khoản trong Cấu hình chung; phải tích "đã nhận tiền" mới xác nhận | BMS-231 | ✅ |
 | FR-25 | Giảm giá có duyệt | Nhân viên, Admin | Nhân viên xin giảm theo % kèm lý do; trong hạn mức của nhân viên thì tự duyệt, vượt hạn mức chờ Admin duyệt | BMS-232 | ✅ |
@@ -181,7 +181,7 @@ Quy ước cột **Jira**: mã story trên Jira. **TT** = trạng thái hiện t
 | FR-40 | Danh sách vật tư/món | Nhân viên, Admin | Tên, danh mục, đơn vị, tồn, ngưỡng cảnh báo, giá bán, ảnh | BMS-32 | ✅ |
 | FR-41 | Thêm/sửa/xóa món | Admin | Chỉ Admin sửa danh mục kho | BMS-35 | ✅ |
 | FR-42 | Nhập hàng | Nhân viên, Admin | Phiếu nhập nhiều dòng, nhập theo đơn vị quy đổi (thùng → chai) | BMS-33, BMS-236 | ✅ |
-| FR-43 | Theo dõi tồn kho, cập nhật số lượng | Nhân viên, Admin | Tồn tự giảm khi gọi món; Admin chỉnh ±; kiểm kho đếm thực tế và cân bằng tồn | BMS-34, BMS-36 | ✅ |
+| FR-43 | Theo dõi tồn kho, cập nhật số lượng | Nhân viên, Admin | Tồn tăng khi nhập hàng; Admin chỉnh ±; phiếu kiểm kho đếm thực tế và cân bằng tồn (tồn chưa tự giảm khi gọi món) | BMS-34, BMS-36 | ✅ |
 | FR-44 | Cảnh báo hàng sắp hết | Admin | Món dưới ngưỡng hiện ở Tổng quan | BMS-37 | ✅ |
 
 ### 3.6 Tài chính (BMS-7)
@@ -247,7 +247,7 @@ Quy ước cột **Jira**: mã story trên Jira. **TT** = trạng thái hiện t
 
 ### UC-02 Phục vụ và thanh toán một phiên chơi
 **Tác nhân:** Nhân viên. **Tiền điều kiện:** bàn đang chơi.
-1. Nhân viên gọi món (chọn từ kho, số lượng) – tồn kho tự giảm.
+1. Nhân viên gọi món (chọn từ kho, số lượng; tên và giá lấy từ kho).
 2. (Tùy chọn) Tạm dừng / chơi tiếp, chuyển bàn.
 3. "Thanh toán" → nhập phụ thu (nếu có) → "Xác nhận trả bàn": hệ thống chốt tiền giờ theo khung giờ VN, làm tròn 1.000đ.
 4. (Tùy chọn) Xin giảm giá → tự duyệt hoặc chờ Admin duyệt.
@@ -364,6 +364,7 @@ Cơ sở dữ liệu SQLite, 28 bảng, tạo bằng Entity Framework Core.
 | Hạng mục | Tình trạng | Jira |
 |---|---|---|
 | Xóa / vô hiệu hóa nhân viên; sửa họ tên, SĐT nhân viên | Chưa làm / một phần | BMS-29, BMS-28 |
+| Tự trừ tồn kho khi gọi món (hiện cân bằng tồn qua phiếu kiểm kho) | Chưa làm | BMS-34 (mở rộng) |
 | Quản lý khoản chi, lợi nhuận, thống kê món bán chạy, báo cáo theo khoảng ngày | Chưa làm / một phần | BMS-39, 40, 42, 41 |
 | Gửi email quên mật khẩu trên máy chủ | Cần cấu hình SMTP | – |
 | Xác thực SĐT bằng SMS thật | Chưa tích hợp nhà cung cấp SMS | – |
