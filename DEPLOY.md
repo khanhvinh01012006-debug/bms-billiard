@@ -115,6 +115,9 @@ docker compose up -d --build
 Thông tin quán (hotline, email, Facebook, địa chỉ, website) và tài khoản nhận chuyển khoản VietQR
 sửa trong cổng Admin > **Cấu hình chung** (không cần sửa .env hay build lại).
 
+Trang **Swagger** (`https://API_DOMAIN/swagger`) mặc định tắt. Cần demo thì thêm `SWAGGER_ENABLED=true` vào `.env`
+rồi `docker compose up -d api`; xong đặt lại `false` và chạy lại lệnh đó.
+
 CORS của API chỉ cho phép `https://PLAYER_DOMAIN` và `https://ADMIN_DOMAIN` (tự lấy từ .env).
 
 ## Chạy local (Visual Studio) vẫn như cũ

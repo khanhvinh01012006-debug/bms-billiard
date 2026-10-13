@@ -237,10 +237,13 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-if (app.Environment.IsDevelopment())
+// Swagger: luôn bật khi chạy local (Development). Trên máy chủ (Production) mặc định TẮT để không
+// lộ danh sách API; bật tạm khi cần demo bằng biến môi trường Swagger__Enabled=true (SWAGGER_ENABLED
+// trong .env). Swagger chỉ là trang mô tả - mọi API vẫn được JWT bảo vệ như bình thường.
+if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("Swagger:Enabled"))
 {
     app.UseSwagger();
-    app.UseSwaggerUI();
+    app.UseSwaggerUI(options => options.DocumentTitle = "BMS API - Swagger");
 }
 
 app.UseStaticFiles(); // serves wwwroot/uploads

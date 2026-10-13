@@ -17,6 +17,8 @@ services:
       Admin__Email: ${ADMIN_EMAIL:-admin@bms.local}
       Admin__InitialPassword: ${ADMIN_PASSWORD:?Chua dat ADMIN_PASSWORD trong .env}
       Admin__ResetPasswordOnStartup: ${ADMIN_RESET_PASSWORD:-false}
+      # Trang Swagger https://API_DOMAIN/swagger: mặc định tắt, đặt SWAGGER_ENABLED=true trong .env khi cần demo
+      Swagger__Enabled: ${SWAGGER_ENABLED:-false}
       Cors__AllowedOrigins: https://${PLAYER_DOMAIN},https://${ADMIN_DOMAIN}
     volumes:
       # bms.db + uploads/ nằm ở ./data trên VPS -> build lại không mất dữ liệu

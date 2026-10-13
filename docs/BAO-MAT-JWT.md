@@ -362,14 +362,21 @@ curl -i https://api.bmsbilliard.com/api/accounts -H "Authorization: Bearer <toke
 4. Đổi URL thành `https://api.bmsbilliard.com/api/accounts` (API chỉ Admin), dùng token người chơi: kết quả **403 Forbidden**.
 5. Sửa 1 ký tự cuối token rồi Send: kết quả **401**.
 
-### 10.3 Bằng Swagger (chạy API local trong Visual Studio)
-1. Chạy `BMS.API` và mở `https://localhost:5001/swagger`.
+### 10.3 Bằng Swagger
+Có 2 nơi mở Swagger:
+- **Trên tên miền thật:** `https://api.bmsbilliard.com/swagger`. Mặc định **tắt**; bật trước buổi demo bằng cách
+  thêm `SWAGGER_ENABLED=true` vào `/opt/bms/.env` rồi chạy `docker compose up -d api`; xong thì đặt lại `false`.
+- **Trên máy:** chạy `BMS.API` trong Visual Studio (F5) rồi mở `https://localhost:5001/swagger` (dữ liệu thử).
+
+Các bước:
+1. Mở Swagger, gọi `GET /api/wallet/me` → Try it out → Execute: kết quả **401**.
 2. Gọi `POST /api/accounts/login` rồi copy token.
 3. Bấm nút **Authorize** (ổ khóa), dán `Bearer <token>`. Swagger đã cấu hình sẵn kiểu Bearer JWT
    (`Program.cs` mục "Swagger (with Bearer auth support)").
 4. Gọi các API khác để thấy 200 / 401 / 403.
 
-Lưu ý: Swagger chỉ bật khi chạy Development, **không** mở trên VPS để không lộ danh sách API.
+Lưu ý: Swagger chỉ là trang mô tả API. Bật hay tắt Swagger **không** ảnh hưởng bảo mật: mọi API vẫn bắt buộc JWT.
+Trên máy chủ để mặc định tắt (`Program.cs`: chỉ bật khi Development hoặc `Swagger:Enabled=true`) để không lộ danh sách API.
 
 ### 10.4 Xem nội dung token
 Dán token vào <https://jwt.io>: thấy rõ `userId`, `role`, `exp`. Sửa payload trên jwt.io rồi dùng token đó
